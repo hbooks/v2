@@ -1,9 +1,10 @@
+// src/App.tsx
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { CartProvider } from "@/lib/cart-context";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -27,12 +28,30 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-function Layout() {
+// This component waits for auth to load before showing anything
+function AppContent() {
+  const { loading } = useAuth();
   const location = useLocation();
   const isAdmin = location.pathname === "/admin";
 
-  if (isAdmin) return <Admin />;
+  // Show a full‑screen loader while auth is initializing
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
+  // Admin page has its own layout (no Navbar/Footer)
+  if (isAdmin) {
+    return <Admin />;
+  }
+
+  // Normal layout for all other pages
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
@@ -60,23 +79,22 @@ function Layout() {
   );
 }
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <CartProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <Routes>
-              <Route path="/admin" element={<Admin />} />
-              <Route path="/*" element={<Layout />} />
-            </Routes>
-          </BrowserRouter>
-        </TooltipProvider>
-      </CartProvider>
-    </AuthProvider>
-  </QueryClientProvider>
-);
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <CartProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <AppContent />
+            </BrowserRouter>
+          </TooltipProvider>
+        </CartProvider>
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+}
 
 export default App;
