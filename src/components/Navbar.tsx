@@ -15,11 +15,17 @@ const guestLinks = [
 ];
 
 export default function Navbar() {
-  const { user, isGuest, logout } = useAuth();
+  const { user, isGuest, loading, logout } = useAuth();
   const { totalItems } = useCart();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+
+  // Wait for auth to load before rendering any user-dependent UI
+  if (loading) {
+    // Return a placeholder navbar (same height, no content) to avoid layout shift
+    return <div className="h-16 border-b border-border bg-background/80" />;
+  }
 
   const isMember = user?.tag === "member";
 
@@ -77,7 +83,8 @@ export default function Navbar() {
             >
               <User className="h-5 w-5" />
               <span className="hidden text-sm md:inline">
-                {isGuest ? "Guest" : user.username}
+                {/* Safe display: use optional chaining and fallback */}
+                {isGuest ? "Guest" : user?.username ?? "User"}
               </span>
             </button>
 
@@ -98,7 +105,7 @@ export default function Navbar() {
                     </>
                   ) : (
                     <>
-                      <p className="text-sm font-medium text-foreground">{user.username}</p>
+                      <p className="text-sm font-medium text-foreground">{user?.username ?? "User"}</p>
                       <p className="mb-2 text-xs text-muted-foreground">
                         {isMember ? "✨ Membership Active" : "No membership active"}
                       </p>
