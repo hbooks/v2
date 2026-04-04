@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import TurnstileWidget from "@/components/TurnstileWidget";
 
 export default function SignupPage() {
   const { signup } = useAuth();
@@ -14,14 +15,11 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [usernameError, setUsernameError] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   const validateUsername = (val: string) => {
-    if (!/^[a-zA-Z0-9_]+$/.test(val)) {
-      setUsernameError("Only letters, numbers, and underscores");
-      return false;
-    }
-    if (val.length < 3) {
-      setUsernameError("At least 3 characters");
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(val)) {
+      setUsernameError("Only letters, numbers, underscore, 3-20 characters");
       return false;
     }
     setUsernameError("");
@@ -43,13 +41,18 @@ export default function SignupPage() {
       toast.error("Password must be at least 6 characters");
       return;
     }
+    if (!turnstileToken) {
+      toast.error("Please complete the captcha");
+      return;
+    }
 
     setLoading(true);
     try {
-      await signup(username, email, password);
+      await signup(username, email, password, turnstileToken);
+      toast.success("Verification email sent! Check your inbox.");
       navigate("/verify-email");
-    } catch {
-      toast.error("Sign up failed");
+    } catch (err: any) {
+      toast.error(err.message || "Sign up failed");
     } finally {
       setLoading(false);
     }
@@ -67,10 +70,14 @@ export default function SignupPage() {
             <input
               type="text"
               value={username}
-              onChange={(e) => { setUsername(e.target.value); if (e.target.value) validateUsername(e.target.value); }}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                if (e.target.value) validateUsername(e.target.value);
+              }}
               onBlur={() => username && validateUsername(username)}
               className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="your_username"
+              required
             />
             {usernameError && <p className="mt-1 text-xs text-destructive">{usernameError}</p>}
           </div>
@@ -83,6 +90,7 @@ export default function SignupPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="you@example.com"
+              required
             />
           </div>
 
@@ -95,6 +103,7 @@ export default function SignupPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-md border border-input bg-background px-3 py-2.5 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
                 placeholder="••••••••"
+                required
               />
               <button
                 type="button"
@@ -114,17 +123,15 @@ export default function SignupPage() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="••••••••"
+              required
             />
           </div>
 
-          {/* Turnstile placeholder */}
-          <div className="rounded-md border border-dashed border-border bg-secondary/50 px-3 py-4 text-center text-xs text-muted-foreground">
-            🔒 Cloudflare Turnstile captcha will appear here
-          </div>
+          <TurnstileWidget onSuccess={setTurnstileToken} onError={() => setTurnstileToken(null)} />
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !turnstileToken || !!usernameError}
             className="w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? "Creating account..." : "Create Account"}
