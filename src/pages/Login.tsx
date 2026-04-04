@@ -3,14 +3,24 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import TurnstileWidget from "@/components/TurnstileWidget";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+
+  // Redirect if already logged in (after auth loads)
+  if (!authLoading && user) {
+    if (user.tag === "member") navigate("/member-shop");
+    else if (user.tag === "unverified") navigate("/unverified-shop");
+    else navigate("/");
+    return null;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,13 +28,18 @@ export default function LoginPage() {
       toast.error("Please fill in all fields");
       return;
     }
+    if (!turnstileToken) {
+      toast.error("Please complete the captcha");
+      return;
+    }
+
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email, password, turnstileToken);
       toast.success("Welcome back!");
-      navigate("/");
-    } catch {
-      toast.error("Login failed. Please try again.");
+      // Redirect will happen automatically via the useEffect above
+    } catch (err: any) {
+      toast.error(err.message || "Login failed");
     } finally {
       setLoading(false);
     }
@@ -38,13 +53,14 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-foreground">Email or Username</label>
+            <label className="mb-1 block text-sm font-medium text-foreground">Email</label>
             <input
-              type="text"
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="you@example.com"
+              required
             />
           </div>
 
@@ -57,6 +73,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-md border border-input bg-background px-3 py-2.5 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
                 placeholder="••••••••"
+                required
               />
               <button
                 type="button"
@@ -68,14 +85,11 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Turnstile placeholder */}
-          <div className="rounded-md border border-dashed border-border bg-secondary/50 px-3 py-4 text-center text-xs text-muted-foreground">
-            🔒 Cloudflare Turnstile captcha will appear here
-          </div>
+          <TurnstileWidget onSuccess={setTurnstileToken} onError={() => setTurnstileToken(null)} />
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !turnstileToken}
             className="w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign In"}
