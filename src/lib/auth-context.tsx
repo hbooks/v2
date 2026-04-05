@@ -1,249 +1,229 @@
-import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
-import { supabase } from "./supabase";
-import { toast } from "sonner";
+// src/lib/auth-context.tsx
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import { supabase } from './supabase';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 
-export type UserTag = "member" | "non-member" | "guest" | "unverified";
-
-export interface User {
+interface User {
   id: string;
-  username: string;
   email: string;
-  tag: UserTag;
+  username: string;
+  tag: 'member' | 'non-member' | 'unverified';
+  isAdmin?: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
-  isGuest: boolean;
-  loading: boolean;
-  login: (email: string, password: string, turnstileToken: string) => Promise<void>;
-  signup: (username: string, email: string, password: string, turnstileToken: string) => Promise<void>;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  signup: (username: string, email: string, password: string) => Promise<void>;
+  checkIdentifier: (identifier: string) => Promise<{ found: boolean; email: string }>;
   logout: () => Promise<void>;
-  resendVerification: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const SIGNUP_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signup`;
-const LOGIN_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login`;
+export const useAuth = () => {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+};
 
-// Key used to mark that the app is actively signing out (persisted so listener sees it)
-const SIGNING_OUT_KEY = "hb_signing_out_v1";
-
-export function AuthProvider({ children }: { children: ReactNode }) {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const isMountedRef = useRef(true);
+  const [isLoading, setIsLoading] = useState(true); // start true
 
-  async function fetchUserData(userId: string, email: string) {
+  // Fetch user profile from members or unverified_users
+  const fetchUserProfile = useCallback(async (authUser: SupabaseUser) => {
+    // Timeout after 5 seconds
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('Profile fetch timed out')), 5000)
+    );
+
+    // First try members table
+    const membersPromise = supabase
+      .from('members')
+      .select('username, tag')
+      .eq('id', authUser.id)
+      .single();
+
+    let profile = null;
+    let error = null;
     try {
-      const { data: member } = await supabase
-        .from("members")
-        .select("id, username, email, tag")
-        .eq("id", userId)
-        .maybeSingle();
-      if (member) {
-        setUser({
-          id: member.id,
-          username: member.username,
-          email: member.email,
-          tag: member.tag,
-        });
-        return;
+      const result = await Promise.race([membersPromise, timeoutPromise]) as any;
+      if (result.data) {
+        profile = result.data;
+      } else {
+        // Try unverified_users
+        const unverifiedPromise = supabase
+          .from('unverified_users')
+          .select('username')
+          .eq('email', authUser.email!)
+          .single();
+        const unverifiedResult = await Promise.race([unverifiedPromise, timeoutPromise]) as any;
+        if (unverifiedResult.data) {
+          profile = { username: unverifiedResult.data.username, tag: 'unverified' };
+        }
       }
-      const { data: unverified } = await supabase
-        .from("unverified_users")
-        .select("id, username, email")
-        .eq("email", email)
-        .maybeSingle();
-      if (unverified) {
-        setUser({
-          id: userId,
-          username: unverified.username,
-          email: unverified.email,
-          tag: "unverified",
-        });
-        return;
-      }
-      setUser(null);
     } catch (err) {
-      console.error("fetchUserData error:", err);
-      setUser(null);
+      console.error('Profile fetch error or timeout:', err);
     }
-  }
+
+    if (profile) {
+      setUser({
+        id: authUser.id,
+        email: authUser.email!,
+        username: profile.username,
+        tag: profile.tag === 'unverified' ? 'unverified' : (profile.tag === 'member' ? 'member' : 'non-member'),
+        isAdmin: authUser.email === 'admin@hpbooks.uk',
+      });
+    } else {
+      // Fallback – create minimal user from auth metadata
+      const username = authUser.user_metadata?.username || authUser.email?.split('@')[0] || 'user';
+      setUser({
+        id: authUser.id,
+        email: authUser.email!,
+        username,
+        tag: 'non-member',
+        isAdmin: authUser.email === 'admin@hpbooks.uk',
+      });
+    }
+  }, []);
 
   useEffect(() => {
-    isMountedRef.current = true;
-
+    let isMounted = true;
     const init = async () => {
+      setIsLoading(true);
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (isMountedRef.current) {
-          if (session?.user) {
-            await fetchUserData(session.user.id, session.user.email!);
-          } else {
-            setUser(null);
-          }
-          setLoading(false);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (isMounted && session?.user) {
+          await fetchUserProfile(session.user);
         }
       } catch (err) {
-        console.error("Auth init error:", err);
-        if (isMountedRef.current) {
-          setUser(null);
-          setLoading(false);
-        }
+        console.error('Init error:', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
     };
     init();
 
-    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // If we are in the middle of an explicit sign-out (persisted flag), ignore spurious events.
-      const signingOut = sessionStorage.getItem(SIGNING_OUT_KEY);
-      if (signingOut) {
-        console.debug("Auth event ignored during signing out:", event);
-        // If the event is SIGNED_OUT, we still want to ensure local state is cleared and loading is false.
-        if (event === "SIGNED_OUT") {
-          if (isMountedRef.current) {
-            setUser(null);
-            setLoading(false);
-          }
-        }
-        return;
-      }
-
-      if (!isMountedRef.current) return;
-
-      try {
-        if (session?.user) {
-          await fetchUserData(session.user.id, session.user.email!);
-        } else {
-          setUser(null);
-        }
-      } catch (err) {
-        console.error("onAuthStateChange handler error:", err);
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      if (event === 'SIGNED_IN' && session?.user) {
+        setIsLoading(true);
+        await fetchUserProfile(session.user);
+        setIsLoading(false);
+      } else if (event === 'SIGNED_OUT') {
         setUser(null);
-      } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
     });
 
     return () => {
-      isMountedRef.current = false;
-      try {
-        data?.subscription.unsubscribe();
-      } catch (e) {
-        // ignore
-      }
+      isMounted = false;
+      listener?.subscription.unsubscribe();
     };
+  }, [fetchUserProfile]);
+
+  const checkIdentifier = useCallback(async (identifier: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-identifier`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier }),
+        }
+      );
+      if (!res.ok) throw new Error('Network error');
+      return await res.json();
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const login = async (email: string, password: string, turnstileToken: string) => {
-    const response = await fetch(LOGIN_FUNCTION_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, turnstileToken }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-    setUser({
-      id: data.user.id,
-      username: data.user.username,
-      email: data.user.email,
-      tag: data.user.tag,
-    });
-    await supabase.auth.setSession(data.session);
-  };
-
-  const signup = async (username: string, email: string, password: string, turnstileToken: string) => {
-    const response = await fetch(SIGNUP_FUNCTION_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, email, password, turnstileToken }),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
-  };
-
-  const logout = async () => {
-    // Mark signing out so listener ignores intermediate events
+  const login = useCallback(async (email: string, password: string) => {
+    setIsLoading(true);
     try {
-      setLoading(true);
-      sessionStorage.setItem(SIGNING_OUT_KEY, "1");
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      // The onAuthStateChange will handle setting the user
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-      // 1. Sign out from Supabase and wait
-      const { error } = await supabase.auth.signOut();
+  const signup = useCallback(async (username: string, email: string, password: string) => {
+    setIsLoading(true);
+    try {
+      // First check username uniqueness via your edge function or direct query
+      const { data: existingMember } = await supabase
+        .from('members')
+        .select('username')
+        .eq('username', username)
+        .maybeSingle();
+      const { data: existingUnverified } = await supabase
+        .from('unverified_users')
+        .select('username')
+        .eq('username', username)
+        .maybeSingle();
+      if (existingMember || existingUnverified) {
+        throw new Error('Username already taken');
+      }
+
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { username },
+          emailRedirectTo: `${window.location.origin}/verify-email`,
+        },
+      });
       if (error) throw error;
 
-      // 2. Aggressively clear all Supabase-related storage keys from both storages
-      try {
-        const localKeys = Object.keys(localStorage);
-        const sessionKeys = Object.keys(sessionStorage);
-        const allKeys = Array.from(new Set([...localKeys, ...sessionKeys]));
-        for (const key of allKeys) {
-          if (!key) continue;
-          if (key.includes("supabase") || key.startsWith("sb-")) {
-            try {
-              localStorage.removeItem(key);
-            } catch (e) {
-              // ignore
-            }
-            try {
-              sessionStorage.removeItem(key);
-            } catch (e) {
-              // ignore
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("Error while clearing storage keys:", e);
+      // After signup, insert into unverified_users (you may do this in an edge function)
+      // For simplicity, we do it here, but consider moving to edge function.
+      const { data: { user: newUser } } = await supabase.auth.getUser();
+      if (newUser) {
+        await supabase.from('unverified_users').insert([{ id: newUser.id, email, username }]);
       }
-
-      // 3. Clear React state
-      setUser(null);
-
-      // 4. Show success toast
-      try {
-        toast.success("Successfully logged out!");
-      } catch (e) {
-        // ignore toast errors
-      }
-
-      // 5. Ensure loading flag is cleared before hard reload
-      setLoading(false);
-      sessionStorage.removeItem(SIGNING_OUT_KEY);
-
-      // 6. Force a full page reload to home (fully reset the app)
-      window.location.href = "/";
-    } catch (err) {
-      console.error("Logout error:", err);
-      // Always clear the signing flag and loading to avoid infinite loading states
-      try {
-        sessionStorage.removeItem(SIGNING_OUT_KEY);
-      } catch {}
-      setLoading(false);
-      // Rethrow so callers (e.g. Navbar) can show an error toast
-      throw err;
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, []);
 
-  const resendVerification = async () => {
-    if (!user?.email) throw new Error("No email found");
-    const { error } = await supabase.auth.resend({ type: "signup", email: user.email });
-    if (error) throw error;
-  };
+  const logout = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      // Clear all Supabase storage to be safe
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.includes('supabase') || key.startsWith('sb-')) localStorage.removeItem(key);
+      });
+      const sessionKeys = Object.keys(sessionStorage);
+      sessionKeys.forEach(key => {
+        if (key.includes('supabase') || key.startsWith('sb-')) sessionStorage.removeItem(key);
+      });
+      setUser(null);
+      // Force hard reload to clear any lingering state
+      window.location.href = '/';
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-  const isGuest = !user && !loading;
+  const value = useMemo(() => ({
+    user,
+    isLoading,
+    login,
+    signup,
+    checkIdentifier,
+    logout,
+  }), [user, isLoading, login, signup, checkIdentifier, logout]);
 
-  return (
-    <AuthContext.Provider value={{ user, isGuest, loading, login, signup, logout, resendVerification }}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error("useAuth must be used within AuthProvider");
-  return context;
-}
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
