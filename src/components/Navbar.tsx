@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { BookOpen, ShoppingCart, User, Menu, X, LogOut, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
@@ -19,7 +19,6 @@ export default function Navbar() {
   const { user, isGuest, loading, logout } = useAuth();
   const { totalItems } = useCart();
   const location = useLocation();
-  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
 
@@ -35,15 +34,16 @@ export default function Navbar() {
     return true;
   });
 
- const handleLogout = async () => {
-  try {
-    await logout();
-    // The page will reload and redirect to home inside the logout function.
-    // No extra navigation needed.
-  } catch (err) {
-    toast.error("Logout failed");
-  }
-};
+  const handleLogout = async () => {
+    try {
+      await logout();
+      // logout() will show success toast and force reload to home
+      // No extra navigation needed
+    } catch (err: any) {
+      console.error("Logout failed:", err);
+      toast.error(err?.message || "Logout failed. Please try again.");
+    }
+  };
 
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">

@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, ReactNode, useRef } from "react";
 import { supabase } from "./supabase";
+import { toast } from "sonner";
 
 export type UserTag = "member" | "non-member" | "guest" | "unverified";
 
@@ -25,9 +26,13 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const SIGNUP_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signup`;
 const LOGIN_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login`;
 
+// Key used to mark that the app is actively signing out (persisted so listener sees it)
+const SIGNING_OUT_KEY = "hb_signing_out_v1";
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const isMountedRef = useRef(true);
 
   async function fetchUserData(userId: string, email: string) {
     try {
@@ -67,11 +72,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    let isMounted = true;
+    isMountedRef.current = true;
+
     const init = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (isMounted) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (isMountedRef.current) {
           if (session?.user) {
             await fetchUserData(session.user.id, session.user.email!);
           } else {
@@ -81,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch (err) {
         console.error("Auth init error:", err);
-        if (isMounted) {
+        if (isMountedRef.current) {
           setUser(null);
           setLoading(false);
         }
@@ -89,20 +97,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     init();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (isMounted) {
+    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // If we are in the middle of an explicit sign-out (persisted flag), ignore spurious events.
+      const signingOut = sessionStorage.getItem(SIGNING_OUT_KEY);
+      if (signingOut) {
+        console.debug("Auth event ignored during signing out:", event);
+        // If the event is SIGNED_OUT, we still want to ensure local state is cleared and loading is false.
+        if (event === "SIGNED_OUT") {
+          if (isMountedRef.current) {
+            setUser(null);
+            setLoading(false);
+          }
+        }
+        return;
+      }
+
+      if (!isMountedRef.current) return;
+
+      try {
         if (session?.user) {
           await fetchUserData(session.user.id, session.user.email!);
         } else {
           setUser(null);
         }
+      } catch (err) {
+        console.error("onAuthStateChange handler error:", err);
+        setUser(null);
+      } finally {
         setLoading(false);
       }
     });
 
     return () => {
-      isMounted = false;
-      listener?.subscription.unsubscribe();
+      isMountedRef.current = false;
+      try {
+        data?.subscription.unsubscribe();
+      } catch (e) {
+        // ignore
+      }
     };
   }, []);
 
@@ -134,33 +166,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    setLoading(true);
+    // Mark signing out so listener ignores intermediate events
     try {
-      // 1. Sign out from Supabase (this invalidates the session on the server)
+      setLoading(true);
+      sessionStorage.setItem(SIGNING_OUT_KEY, "1");
+
+      // 1. Sign out from Supabase and wait
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
 
-      // 2. Aggressively clear all Supabase-related storage
-      const allKeys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
-      allKeys.forEach(key => {
-        if (key.includes('supabase') || key.startsWith('sb-')) {
-          localStorage.removeItem(key);
-          sessionStorage.removeItem(key);
+      // 2. Aggressively clear all Supabase-related storage keys from both storages
+      try {
+        const localKeys = Object.keys(localStorage);
+        const sessionKeys = Object.keys(sessionStorage);
+        const allKeys = Array.from(new Set([...localKeys, ...sessionKeys]));
+        for (const key of allKeys) {
+          if (!key) continue;
+          if (key.includes("supabase") || key.startsWith("sb-")) {
+            try {
+              localStorage.removeItem(key);
+            } catch (e) {
+              // ignore
+            }
+            try {
+              sessionStorage.removeItem(key);
+            } catch (e) {
+              // ignore
+            }
+          }
         }
-      });
+      } catch (e) {
+        console.warn("Error while clearing storage keys:", e);
+      }
 
       // 3. Clear React state
       setUser(null);
 
-      // 4. Show success message
-      alert("Successfully logged out!");
+      // 4. Show success toast
+      try {
+        toast.success("Successfully logged out!");
+      } catch (e) {
+        // ignore toast errors
+      }
 
-      // 5. Force a full page reload to home (clears any remaining memory state)
-      window.location.href = '/';
+      // 5. Ensure loading flag is cleared before hard reload
+      setLoading(false);
+      sessionStorage.removeItem(SIGNING_OUT_KEY);
+
+      // 6. Force a full page reload to home (fully reset the app)
+      window.location.href = "/";
     } catch (err) {
       console.error("Logout error:", err);
-      alert("Logout failed. Please try again.");
+      // Always clear the signing flag and loading to avoid infinite loading states
+      try {
+        sessionStorage.removeItem(SIGNING_OUT_KEY);
+      } catch {}
       setLoading(false);
+      // Rethrow so callers (e.g. Navbar) can show an error toast
+      throw err;
     }
   };
 
