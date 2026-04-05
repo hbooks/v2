@@ -15,7 +15,6 @@ export default function LoginPage() {
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileReset, setTurnstileReset] = useState(0);
 
-  // Redirect based on user tag after auth loads
   useEffect(() => {
     if (!authLoading && user) {
       if (user.tag === "member") navigate("/member-shop");
@@ -31,7 +30,7 @@ export default function LoginPage() {
       return;
     }
     if (!turnstileToken) {
-      toast.error("Please complete the captcha");
+      toast.error("Captcha still loading, please wait...");
       return;
     }
 
@@ -41,7 +40,7 @@ export default function LoginPage() {
       toast.success("Welcome back!");
     } catch (err: any) {
       toast.error(err.message || "Login failed");
-      // Reset captcha to get a fresh token
+      // Reset Turnstile to get a fresh token
       setTurnstileToken(null);
       setTurnstileReset(prev => prev + 1);
     } finally {
@@ -93,6 +92,7 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Invisible Turnstile – no user‑visible widget */}
           <TurnstileWidget
             key={turnstileReset}
             onSuccess={setTurnstileToken}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 
 interface TurnstileWidgetProps {
   onSuccess: (token: string) => void;
@@ -21,14 +21,13 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
   const errorRef = useRef(onError);
   const expiredRef = useRef(onExpired);
 
-  // Update refs when callbacks change
   useEffect(() => {
     successRef.current = onSuccess;
     errorRef.current = onError;
     expiredRef.current = onExpired;
   }, [onSuccess, onError, onExpired]);
 
-  // Load script once
+  // Load Turnstile script once
   useEffect(() => {
     if (!siteKey) return;
     if (document.querySelector("#turnstile-script")) return;
@@ -41,7 +40,7 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
     document.head.appendChild(script);
   }, [siteKey]);
 
-  // Render or reset widget
+  // Render invisible widget
   useEffect(() => {
     if (!siteKey || !window.turnstile) return;
 
@@ -52,6 +51,8 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
           window.turnstile.remove(widgetIdRef.current);
         } catch (e) {}
       }
+
+      // Invisible mode: use execution: 'execute' and hide the widget
       widgetIdRef.current = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
         callback: (token: string) => {
@@ -63,6 +64,9 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
         "expired-callback": () => {
           expiredRef.current?.();
         },
+        // Invisible mode settings
+        execution: "execute",
+        appearance: "interaction-only",
         theme: "light",
       });
     };
@@ -75,6 +79,14 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
     }
   }, [siteKey, reset]);
 
+  // Automatically execute the challenge when the widget is ready
+  useEffect(() => {
+    if (!window.turnstile || !widgetIdRef.current) return;
+    // Execute the invisible challenge
+    window.turnstile.execute(widgetIdRef.current);
+  }, [reset]); // re‑execute when reset changes
+
   if (!siteKey) return <div className="text-destructive text-sm">Missing Turnstile key</div>;
-  return <div ref={containerRef} />;
+  // Render a hidden container – invisible to the user
+  return <div ref={containerRef} style={{ display: "none" }} />;
 }

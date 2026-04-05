@@ -1,3 +1,4 @@
+// src/pages/Signup.tsx
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
@@ -16,6 +17,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [usernameError, setUsernameError] = useState("");
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   const validateUsername = (val: string) => {
     if (!/^[a-zA-Z0-9_]{3,20}$/.test(val)) {
@@ -42,7 +44,7 @@ export default function SignupPage() {
       return;
     }
     if (!turnstileToken) {
-      toast.error("Please complete the captcha");
+      toast.error("Captcha still loading, please wait...");
       return;
     }
 
@@ -53,6 +55,9 @@ export default function SignupPage() {
       navigate("/verify-email");
     } catch (err: any) {
       toast.error(err.message || "Sign up failed");
+      // Reset Turnstile on error
+      setTurnstileToken(null);
+      setTurnstileReset(prev => prev + 1);
     } finally {
       setLoading(false);
     }
@@ -127,7 +132,12 @@ export default function SignupPage() {
             />
           </div>
 
-          <TurnstileWidget onSuccess={setTurnstileToken} onError={() => setTurnstileToken(null)} />
+          <TurnstileWidget
+            key={turnstileReset}
+            onSuccess={setTurnstileToken}
+            onError={() => setTurnstileToken(null)}
+            onExpired={() => setTurnstileToken(null)}
+          />
 
           <button
             type="submit"
