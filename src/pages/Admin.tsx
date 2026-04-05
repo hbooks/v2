@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import {
@@ -13,6 +12,7 @@ import {
   Newspaper,
   BarChart3,
   X,
+  LogOut,
 } from "lucide-react";
 
 // ---------- Types ----------
@@ -23,7 +23,7 @@ type Product = {
   price: number;
   type: "book" | "exclusive";
   stock_status: "in_stock" | "out_of_stock";
-  images: string[];          // array of image URLs
+  images: string[];
   file_url?: string;
   created_at: string;
 };
@@ -73,23 +73,23 @@ async function uploadImages(files: FileList, productName: string): Promise<strin
 
 // ---------- Main Admin Component ----------
 export default function AdminPage() {
-  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
 
-  const [activeTab, setActiveTab] = useState<
-    "overview" | "products" | "updates" | "messages"
-  >("overview");
-
+  const [activeTab, setActiveTab] = useState<"overview" | "products" | "updates" | "messages">("overview");
   const [products, setProducts] = useState<Product[]>([]);
   const [updates, setUpdates] = useState<Update[]>([]);
   const [messages, setMessages] = useState<ContactMessage[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
   const [stats, setStats] = useState<Stat>({
     totalProducts: 0,
     totalUsers: 0,
     totalMembers: 0,
     totalMessages: 0,
   });
-  const [loadingData, setLoadingData] = useState(true);
 
   // Modal states
   const [showProductModal, setShowProductModal] = useState(false);
@@ -97,63 +97,59 @@ export default function AdminPage() {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [editingUpdate, setEditingUpdate] = useState<Update | null>(null);
 
-  // Form states (updated for multiple images)
+  // Form states
   const [productForm, setProductForm] = useState({
     name: "",
     description: "",
     price: "",
     type: "book" as "book" | "exclusive",
     stock_status: "in_stock" as "in_stock" | "out_of_stock",
-    existingImages: [] as string[],   // already stored URLs
-    newImages: [] as File[],          // new files to upload
+    existingImages: [] as string[],
+    newImages: [] as File[],
     product_file: null as File | null,
   });
   const [updateForm, setUpdateForm] = useState({ title: "", content: "" });
 
-  // Redirect if not admin
-  useEffect(() => {
-    if (!authLoading) {
-      if (!user || user.email !== "admin@hpbooks.uk") {
-        navigate("/");
-      }
-    }
-  }, [authLoading, user, navigate]);
+  // Admin credentials from .env (no fallback)
+  const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME;
+  const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD;
 
-  // Fetch all data
+  // Handle login
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+    if (loginUsername === ADMIN_USERNAME && loginPassword === ADMIN_PASSWORD) {
+      setIsAdminLoggedIn(true);
+      toast.success("Admin access granted");
+      fetchAllData();
+    } else {
+      setLoginError("Invalid username or password");
+    }
+  };
+
+  // Handle logout – reset state and redirect to home
+  const handleLogout = () => {
+    setIsAdminLoggedIn(false);
+    setLoginUsername("");
+    setLoginPassword("");
+    toast.info("Logged out of admin panel");
+    navigate("/");
+  };
+
+  // Fetch all data (only after successful login)
   const fetchAllData = async () => {
     setLoadingData(true);
     try {
-      const { data: productsData } = await supabase
-        .from("products")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const { data: productsData } = await supabase.from("products").select("*").order("created_at", { ascending: false });
       setProducts(productsData || []);
-
-      const { data: updatesData } = await supabase
-        .from("updates")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const { data: updatesData } = await supabase.from("updates").select("*").order("created_at", { ascending: false });
       setUpdates(updatesData || []);
-
-      const { data: messagesData } = await supabase
-        .from("contact_messages")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const { data: messagesData } = await supabase.from("contact_messages").select("*").order("created_at", { ascending: false });
       setMessages(messagesData || []);
-
-      const { count: totalProducts } = await supabase
-        .from("products")
-        .select("*", { count: "exact", head: true });
-      const { count: totalUsers } = await supabase
-        .from("members")
-        .select("*", { count: "exact", head: true });
-      const { count: totalMembers } = await supabase
-        .from("members")
-        .select("*", { count: "exact", head: true })
-        .eq("tag", "member");
-      const { count: totalMessages } = await supabase
-        .from("contact_messages")
-        .select("*", { count: "exact", head: true });
+      const { count: totalProducts } = await supabase.from("products").select("*", { count: "exact", head: true });
+      const { count: totalUsers } = await supabase.from("members").select("*", { count: "exact", head: true });
+      const { count: totalMembers } = await supabase.from("members").select("*", { count: "exact", head: true }).eq("tag", "member");
+      const { count: totalMessages } = await supabase.from("contact_messages").select("*", { count: "exact", head: true });
       setStats({
         totalProducts: totalProducts || 0,
         totalUsers: totalUsers || 0,
@@ -168,13 +164,7 @@ export default function AdminPage() {
     }
   };
 
-  useEffect(() => {
-    if (user?.email === "admin@hpbooks.uk") {
-      fetchAllData();
-    }
-  }, [user]);
-
-  // ---------- Product CRUD with multiple images ----------
+  // ---------- Product CRUD ----------
   const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productForm.name || !productForm.price) {
@@ -183,7 +173,6 @@ export default function AdminPage() {
     }
 
     let imageUrls = [...productForm.existingImages];
-    // Upload new images
     if (productForm.newImages.length > 0) {
       const newUrls = await uploadImages(productForm.newImages as unknown as FileList, productForm.name);
       imageUrls = [...imageUrls, ...newUrls];
@@ -193,9 +182,7 @@ export default function AdminPage() {
     if (productForm.product_file) {
       const ext = productForm.product_file.name.split(".").pop();
       const fileName = `${Date.now()}_${productForm.name.replace(/\s/g, "_")}.${ext}`;
-      const { data, error } = await supabase.storage
-        .from("product-files")
-        .upload(fileName, productForm.product_file, { upsert: true });
+      const { data, error } = await supabase.storage.from("product-files").upload(fileName, productForm.product_file, { upsert: true });
       if (!error && data) filePath = data.path;
       else toast.error("Failed to upload product file");
     }
@@ -212,16 +199,11 @@ export default function AdminPage() {
 
     let error;
     if (editingProduct) {
-      const { error: updateErr } = await supabase
-        .from("products")
-        .update(productData)
-        .eq("id", editingProduct.id);
+      const { error: updateErr } = await supabase.from("products").update(productData).eq("id", editingProduct.id);
       error = updateErr;
       if (!error) toast.success("Product updated");
     } else {
-      const { error: insertErr } = await supabase
-        .from("products")
-        .insert([productData]);
+      const { error: insertErr } = await supabase.from("products").insert([productData]);
       error = insertErr;
       if (!error) toast.success("Product added");
     }
@@ -246,10 +228,7 @@ export default function AdminPage() {
 
   const toggleStock = async (id: string, currentStatus: string) => {
     const newStatus = currentStatus === "in_stock" ? "out_of_stock" : "in_stock";
-    const { error } = await supabase
-      .from("products")
-      .update({ stock_status: newStatus })
-      .eq("id", id);
+    const { error } = await supabase.from("products").update({ stock_status: newStatus }).eq("id", id);
     if (error) toast.error(error.message);
     else {
       toast.success(`Product ${newStatus === "in_stock" ? "in stock" : "out of stock"}`);
@@ -297,32 +276,25 @@ export default function AdminPage() {
     });
   };
 
-  // ---------- Update CRUD (unchanged) ----------
+  // ---------- Update CRUD ----------
   const handleUpdateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!updateForm.title || !updateForm.content) {
       toast.error("Title and content are required");
       return;
     }
-
     let error;
     if (editingUpdate) {
-      const { error: updateErr } = await supabase
-        .from("updates")
-        .update({ title: updateForm.title, content: updateForm.content })
-        .eq("id", editingUpdate.id);
+      const { error: updateErr } = await supabase.from("updates").update({ title: updateForm.title, content: updateForm.content }).eq("id", editingUpdate.id);
       error = updateErr;
       if (!error) toast.success("Update edited");
     } else {
-      const { error: insertErr } = await supabase
-        .from("updates")
-        .insert([{ title: updateForm.title, content: updateForm.content }]);
+      const { error: insertErr } = await supabase.from("updates").insert([{ title: updateForm.title, content: updateForm.content }]);
       error = insertErr;
       if (!error) toast.success("Update posted");
     }
-    if (error) {
-      toast.error(error.message);
-    } else {
+    if (error) toast.error(error.message);
+    else {
       fetchAllData();
       setShowUpdateModal(false);
       resetUpdateForm();
@@ -350,9 +322,7 @@ export default function AdminPage() {
     setShowUpdateModal(true);
   };
 
-  const resetUpdateForm = () => {
-    setUpdateForm({ title: "", content: "" });
-  };
+  const resetUpdateForm = () => setUpdateForm({ title: "", content: "" });
 
   // ---------- Message handling ----------
   const deleteMessage = async (id: string) => {
@@ -365,8 +335,51 @@ export default function AdminPage() {
     }
   };
 
-  // ---------- Loading & Auth ----------
-  if (authLoading || loadingData) {
+  // ---------- Render login form if not authenticated ----------
+  if (!isAdminLoggedIn) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-lg">
+          <h1 className="mb-2 text-3xl font-bold text-foreground">Admin Login</h1>
+          <p className="mb-6 text-sm text-muted-foreground">Enter your credentials to access the admin panel</p>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Username</label>
+              <input
+                type="text"
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm"
+                placeholder="Username"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Password</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm"
+                placeholder="Password"
+                required
+              />
+            </div>
+            {loginError && <p className="text-sm text-destructive">{loginError}</p>}
+            <button
+              type="submit"
+              className="w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Log In
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- Loading state for admin panel data ----------
+  if (loadingData) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
@@ -377,9 +390,7 @@ export default function AdminPage() {
     );
   }
 
-  if (!user || user.email !== "admin@hpbooks.uk") return null;
-
-  // ---------- UI Components ----------
+  // ---------- Admin Panel UI ----------
   const tabs = [
     { id: "overview" as const, label: "Overview", icon: BarChart3 },
     { id: "products" as const, label: "Products", icon: Package },
@@ -390,11 +401,11 @@ export default function AdminPage() {
   return (
     <div className="flex min-h-screen bg-background">
       {/* Sidebar */}
-      <aside className="w-64 border-r border-border bg-card p-6">
+      <aside className="w-64 border-r border-border bg-card p-6 flex flex-col">
         <h1 className="mb-8 font-heading text-xl font-bold text-foreground">
           Hbooks <span className="text-primary">Admin</span>
         </h1>
-        <nav className="space-y-1">
+        <nav className="space-y-1 flex-1">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -410,36 +421,25 @@ export default function AdminPage() {
             </button>
           ))}
         </nav>
+        <button
+          onClick={handleLogout}
+          className="mt-6 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-destructive hover:bg-secondary transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+          Logout
+        </button>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 p-8">
         {activeTab === "overview" && (
           <div>
-            <h2 className="mb-6 font-heading text-2xl font-bold text-foreground">
-              Dashboard Overview
-            </h2>
+            <h2 className="mb-6 font-heading text-2xl font-bold text-foreground">Dashboard Overview</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard
-                label="Total Products"
-                value={stats.totalProducts}
-                icon={Package}
-              />
-              <StatCard
-                label="Total Users"
-                value={stats.totalUsers}
-                icon={Users}
-              />
-              <StatCard
-                label="Active Members"
-                value={stats.totalMembers}
-                icon={Users}
-              />
-              <StatCard
-                label="Messages"
-                value={stats.totalMessages}
-                icon={MessageSquare}
-              />
+              <StatCard label="Total Products" value={stats.totalProducts} icon={Package} />
+              <StatCard label="Total Users" value={stats.totalUsers} icon={Users} />
+              <StatCard label="Active Members" value={stats.totalMembers} icon={Users} />
+              <StatCard label="Messages" value={stats.totalMessages} icon={MessageSquare} />
             </div>
           </div>
         )}
@@ -447,13 +447,8 @@ export default function AdminPage() {
         {activeTab === "products" && (
           <div>
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="font-heading text-2xl font-bold text-foreground">
-                Products
-              </h2>
-              <button
-                onClick={() => openProductModal()}
-                className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
+              <h2 className="font-heading text-2xl font-bold text-foreground">Products</h2>
+              <button onClick={() => openProductModal()} className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
                 <Plus className="h-4 w-4" /> Add Product
               </button>
             </div>
@@ -477,22 +472,14 @@ export default function AdminPage() {
                       <tr key={product.id} className="border-b border-border last:border-0">
                         <td className="px-4 py-3">
                           {product.images && product.images[0] ? (
-                            <img
-                              src={product.images[0]}
-                              alt=""
-                              className="h-10 w-10 rounded object-cover"
-                            />
+                            <img src={product.images[0]} alt="" className="h-10 w-10 rounded object-cover" />
                           ) : (
-                            <div className="h-10 w-10 rounded bg-muted flex items-center justify-center text-muted-foreground text-xs">
-                              No img
-                            </div>
+                            <div className="h-10 w-10 rounded bg-muted flex items-center justify-center text-muted-foreground text-xs">No img</div>
                           )}
                         </td>
                         <td className="px-4 py-3 font-medium">{product.name}</td>
                         <td className="px-4 py-3">
-                          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs capitalize">
-                            {product.type}
-                          </span>
+                          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs capitalize">{product.type}</span>
                         </td>
                         <td className="px-4 py-3">${product.price.toFixed(2)}</td>
                         <td className="px-4 py-3">
@@ -508,18 +495,8 @@ export default function AdminPage() {
                           </button>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() => openProductModal(product)}
-                            className="mr-2 text-muted-foreground hover:text-foreground"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => deleteProduct(product.id)}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <button onClick={() => openProductModal(product)} className="mr-2 text-muted-foreground hover:text-foreground"><Edit className="h-4 w-4" /></button>
+                          <button onClick={() => deleteProduct(product.id)} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
                         </td>
                       </tr>
                     ))}
@@ -533,13 +510,8 @@ export default function AdminPage() {
         {activeTab === "updates" && (
           <div>
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="font-heading text-2xl font-bold text-foreground">
-                News Updates
-              </h2>
-              <button
-                onClick={() => openUpdateModal()}
-                className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
+              <h2 className="font-heading text-2xl font-bold text-foreground">News Updates</h2>
+              <button onClick={() => openUpdateModal()} className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
                 <Plus className="h-4 w-4" /> New Update
               </button>
             </div>
@@ -548,32 +520,15 @@ export default function AdminPage() {
             ) : (
               <div className="space-y-4">
                 {updates.map((update) => (
-                  <div
-                    key={update.id}
-                    className="flex items-start justify-between rounded-lg border border-border bg-card p-4"
-                  >
+                  <div key={update.id} className="flex items-start justify-between rounded-lg border border-border bg-card p-4">
                     <div className="flex-1">
-                      <h3 className="font-heading text-lg font-semibold text-foreground">
-                        {update.title}
-                      </h3>
+                      <h3 className="font-heading text-lg font-semibold text-foreground">{update.title}</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{update.content}</p>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        {new Date(update.created_at).toLocaleDateString()}
-                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">{new Date(update.created_at).toLocaleDateString()}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => openUpdateModal(update)}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => deleteUpdate(update.id)}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <button onClick={() => openUpdateModal(update)} className="text-muted-foreground hover:text-foreground"><Edit className="h-4 w-4" /></button>
+                      <button onClick={() => deleteUpdate(update.id)} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   </div>
                 ))}
@@ -584,33 +539,21 @@ export default function AdminPage() {
 
         {activeTab === "messages" && (
           <div>
-            <h2 className="mb-6 font-heading text-2xl font-bold text-foreground">
-              Contact Messages
-            </h2>
+            <h2 className="mb-6 font-heading text-2xl font-bold text-foreground">Contact Messages</h2>
             {messages.length === 0 ? (
               <p className="text-muted-foreground">No messages yet.</p>
             ) : (
               <div className="space-y-4">
                 {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className="rounded-lg border border-border bg-card p-4"
-                  >
+                  <div key={msg.id} className="rounded-lg border border-border bg-card p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="font-medium text-foreground">{msg.name}</p>
                         <p className="text-xs text-muted-foreground">{msg.email}</p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-xs text-muted-foreground">
-                          {new Date(msg.created_at).toLocaleDateString()}
-                        </span>
-                        <button
-                          onClick={() => deleteMessage(msg.id)}
-                          className="text-xs text-destructive hover:underline"
-                        >
-                          Delete
-                        </button>
+                        <span className="text-xs text-muted-foreground">{new Date(msg.created_at).toLocaleDateString()}</span>
+                        <button onClick={() => deleteMessage(msg.id)} className="text-xs text-destructive hover:underline">Delete</button>
                       </div>
                     </div>
                     <p className="mt-2 text-sm text-muted-foreground">{msg.message}</p>
@@ -622,12 +565,10 @@ export default function AdminPage() {
         )}
       </main>
 
-      {/* Product Modal with multiple image support */}
+      {/* Product Modal */}
       {showProductModal && (
         <Modal onClose={() => setShowProductModal(false)}>
-          <h3 className="mb-4 font-heading text-xl font-bold">
-            {editingProduct ? "Edit Product" : "Add Product"}
-          </h3>
+          <h3 className="mb-4 font-heading text-xl font-bold">{editingProduct ? "Edit Product" : "Add Product"}</h3>
           <form onSubmit={handleProductSubmit} className="space-y-4">
             <input
               type="text"
@@ -670,7 +611,7 @@ export default function AdminPage() {
               <option value="out_of_stock">Out of Stock</option>
             </select>
 
-            {/* Existing images preview with delete option */}
+            {/* Existing images preview */}
             {productForm.existingImages.length > 0 && (
               <div>
                 <label className="block text-sm font-medium mb-1">Current Images</label>
@@ -691,35 +632,28 @@ export default function AdminPage() {
               </div>
             )}
 
-            {/* Upload new images (multiple) */}
+            {/* Upload new images */}
             <div>
               <label className="block text-sm font-medium mb-1">Add New Images (multiple)</label>
               <input
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(e) => {
-                  const files = Array.from(e.target.files || []);
-                  setProductForm({ ...productForm, newImages: files });
-                }}
+                onChange={(e) => setProductForm({ ...productForm, newImages: Array.from(e.target.files || []) })}
                 className="w-full"
               />
               {productForm.newImages.length > 0 && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  {productForm.newImages.length} new file(s) selected
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">{productForm.newImages.length} new file(s) selected</p>
               )}
             </div>
 
-            {/* Product file upload (unchanged) */}
+            {/* Product file upload */}
             <div>
               <label className="block text-sm font-medium mb-1">Product File (PDF/EPUB)</label>
               <input
                 type="file"
                 accept=".pdf,.epub"
-                onChange={(e) =>
-                  setProductForm({ ...productForm, product_file: e.target.files?.[0] || null })
-                }
+                onChange={(e) => setProductForm({ ...productForm, product_file: e.target.files?.[0] || null })}
                 className="w-full"
               />
               {productForm.product_file && (
@@ -728,30 +662,17 @@ export default function AdminPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowProductModal(false)}
-                className="rounded-md border border-input px-4 py-2 text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              >
-                {editingProduct ? "Update" : "Create"}
-              </button>
+              <button type="button" onClick={() => setShowProductModal(false)} className="rounded-md border border-input px-4 py-2 text-sm">Cancel</button>
+              <button type="submit" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{editingProduct ? "Update" : "Create"}</button>
             </div>
           </form>
         </Modal>
       )}
 
-      {/* Update Modal (unchanged) */}
+      {/* Update Modal */}
       {showUpdateModal && (
         <Modal onClose={() => setShowUpdateModal(false)}>
-          <h3 className="mb-4 font-heading text-xl font-bold">
-            {editingUpdate ? "Edit Update" : "New Update"}
-          </h3>
+          <h3 className="mb-4 font-heading text-xl font-bold">{editingUpdate ? "Edit Update" : "New Update"}</h3>
           <form onSubmit={handleUpdateSubmit} className="space-y-4">
             <input
               type="text"
@@ -770,19 +691,8 @@ export default function AdminPage() {
               required
             />
             <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowUpdateModal(false)}
-                className="rounded-md border border-input px-4 py-2 text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              >
-                {editingUpdate ? "Update" : "Post"}
-              </button>
+              <button type="button" onClick={() => setShowUpdateModal(false)} className="rounded-md border border-input px-4 py-2 text-sm">Cancel</button>
+              <button type="submit" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{editingUpdate ? "Update" : "Post"}</button>
             </div>
           </form>
         </Modal>
@@ -792,15 +702,7 @@ export default function AdminPage() {
 }
 
 // ---------- Helper Components ----------
-function StatCard({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: number;
-  icon: React.ElementType;
-}) {
+function StatCard({ label, value, icon: Icon }: { label: string; value: number; icon: React.ElementType }) {
   return (
     <div className="rounded-lg border border-border bg-card p-6">
       <Icon className="h-5 w-5 text-muted-foreground" />
@@ -810,22 +712,11 @@ function StatCard({
   );
 }
 
-function Modal({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg bg-card p-6 shadow-lg">
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 text-muted-foreground hover:text-foreground"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <button onClick={onClose} className="absolute right-4 top-4 text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
         {children}
       </div>
     </div>
