@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { Eye, EyeOff } from "lucide-react";
@@ -14,13 +14,18 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
-  // Redirect if already logged in (after auth loads)
-  if (!authLoading && user) {
-    if (user.tag === "member") navigate("/member-shop");
-    else if (user.tag === "unverified") navigate("/unverified-shop");
-    else navigate("/");
-    return null;
-  }
+  // Redirect based on user tag after auth loads
+  useEffect(() => {
+    if (!authLoading && user) {
+      if (user.tag === "member") {
+        navigate("/member-shop");
+      } else if (user.tag === "unverified") {
+        navigate("/unverified-shop");
+      } else {
+        navigate("/");
+      }
+    }
+  }, [authLoading, user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,13 +42,25 @@ export default function LoginPage() {
     try {
       await login(email, password, turnstileToken);
       toast.success("Welcome back!");
-      // Redirect will happen automatically via the useEffect above
+      // Redirect happens in useEffect above
     } catch (err: any) {
       toast.error(err.message || "Login failed");
     } finally {
       setLoading(false);
     }
   };
+
+  // Show loading while auth is initializing
+  if (authLoading) {
+    return (
+      <div className="flex min-h-[80vh] items-center justify-center">
+        <div className="text-center">Loading...</div>
+      </div>
+    );
+  }
+
+  // If already logged in, don't show the form (redirect will happen)
+  if (user) return null;
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center px-4">
@@ -71,6 +88,7 @@ export default function LoginPage() {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
                 className="w-full rounded-md border border-input bg-background px-3 py-2.5 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
                 placeholder="••••••••"
                 required
