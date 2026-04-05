@@ -97,14 +97,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
 
-    // Set user from edge function response
     setUser({
       id: data.user.id,
       username: data.user.username,
       email: data.user.email,
       tag: data.user.tag,
     });
-    // Set Supabase session (so that future page reloads keep the session)
     await supabase.auth.setSession(data.session);
   };
 
@@ -116,7 +114,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
-    // After signup, user stays unverified – no automatic login
   };
 
   const logout = async () => {

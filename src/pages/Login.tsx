@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileKey, setTurnstileKey] = useState(0); // force reset
 
   // Redirect based on user tag after auth loads
   useEffect(() => {
@@ -42,15 +43,22 @@ export default function LoginPage() {
     try {
       await login(email, password, turnstileToken);
       toast.success("Welcome back!");
-      // Redirect happens in useEffect above
+      // Redirect happens in useEffect
     } catch (err: any) {
       toast.error(err.message || "Login failed");
+      // Reset captcha on failure to prevent token reuse
+      setTurnstileToken(null);
+      setTurnstileKey(prev => prev + 1);
+      // Reset the Turnstile widget if possible
+      if (window.turnstile && window.turnstile.reset) {
+        const widget = document.querySelector('.cf-turnstile');
+        if (widget) window.turnstile.reset(widget);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Show loading while auth is initializing
   if (authLoading) {
     return (
       <div className="flex min-h-[80vh] items-center justify-center">
@@ -59,7 +67,6 @@ export default function LoginPage() {
     );
   }
 
-  // If already logged in, don't show the form (redirect will happen)
   if (user) return null;
 
   return (
@@ -103,7 +110,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <TurnstileWidget onSuccess={setTurnstileToken} onError={() => setTurnstileToken(null)} />
+          <TurnstileWidget key={turnstileKey} onSuccess={setTurnstileToken} onError={() => setTurnstileToken(null)} />
 
           <button
             type="submit"
