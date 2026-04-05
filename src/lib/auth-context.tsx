@@ -29,64 +29,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch user data from session (used after page reload)
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchUserData(session.user.id, session.user.email!);
-      } else {
-        setLoading(false);
+  async function fetchUserData(userId: string, email: string) {
+    try {
+      // First check members
+      const { data: member } = await supabase
+        .from("members")
+        .select("id, username, email, tag")
+        .eq("id", userId)
+        .single();
+      if (member) {
+        setUser({
+          id: member.id,
+          username: member.username,
+          email: member.email,
+          tag: member.tag,
+        });
+        return;
       }
-    });
+
+      // Then unverified_users
+      const { data: unverified } = await supabase
+        .from("unverified_users")
+        .select("id, username, email")
+        .eq("email", email)
+        .single();
+      if (unverified) {
+        setUser({
+          id: userId,
+          username: unverified.username,
+          email: unverified.email,
+          tag: "unverified",
+        });
+      } else {
+        setUser(null);
+      }
+    } catch (err) {
+      console.error("fetchUserData error:", err);
+      setUser(null);
+    }
+  }
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!isMounted) return;
+      if (session?.user) {
+        await fetchUserData(session.user.id, session.user.email!);
+      }
+      setLoading(false);
+    };
+    initAuth();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
+      if (!isMounted) return;
+      if (event === "SIGNED_OUT") {
+        setUser(null);
+        setLoading(false);
+      } else if (session?.user) {
         await fetchUserData(session.user.id, session.user.email!);
       } else {
         setUser(null);
-        setLoading(false);
       }
+      setLoading(false);
     });
 
-    return () => listener?.subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      listener?.subscription.unsubscribe();
+    };
   }, []);
-
-  async function fetchUserData(userId: string, email: string) {
-    // First check members
-    const { data: member } = await supabase
-      .from("members")
-      .select("id, username, email, tag")
-      .eq("id", userId)
-      .single();
-    if (member) {
-      setUser({
-        id: member.id,
-        username: member.username,
-        email: member.email,
-        tag: member.tag,
-      });
-      setLoading(false);
-      return;
-    }
-
-    // Then unverified_users
-    const { data: unverified } = await supabase
-      .from("unverified_users")
-      .select("id, username, email")
-      .eq("email", email)
-      .single();
-    if (unverified) {
-      setUser({
-        id: userId,
-        username: unverified.username,
-        email: unverified.email,
-        tag: "unverified",
-      });
-    } else {
-      setUser(null);
-    }
-    setLoading(false);
-  }
 
   const login = async (email: string, password: string, turnstileToken: string) => {
     const response = await fetch(LOGIN_FUNCTION_URL, {
@@ -117,8 +130,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    setLoading(true);
     await supabase.auth.signOut();
     setUser(null);
+    // Do NOT setLoading(false) here – onAuthStateChange will handle it
   };
 
   const resendVerification = async () => {
