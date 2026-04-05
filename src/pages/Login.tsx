@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [captchaLoading, setCaptchaLoading] = useState(true);
   const [turnstileReset, setTurnstileReset] = useState(0);
 
   useEffect(() => {
@@ -40,13 +41,19 @@ export default function LoginPage() {
       toast.success("Welcome back!");
     } catch (err: any) {
       toast.error(err.message || "Login failed");
-      // Reset Turnstile to get a fresh token
+      // Reset captcha
       setTurnstileToken(null);
+      setCaptchaLoading(true);
       setTurnstileReset(prev => prev + 1);
     } finally {
       setLoading(false);
     }
   };
+
+  // When token is received, loading is false
+  useEffect(() => {
+    if (turnstileToken) setCaptchaLoading(false);
+  }, [turnstileToken]);
 
   if (authLoading) return <div className="flex min-h-[80vh] items-center justify-center">Loading...</div>;
   if (user) return null;
@@ -92,12 +99,17 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Invisible Turnstile – no user‑visible widget */}
           <TurnstileWidget
             key={turnstileReset}
             onSuccess={setTurnstileToken}
-            onError={() => setTurnstileToken(null)}
-            onExpired={() => setTurnstileToken(null)}
+            onError={() => {
+              setCaptchaLoading(true);
+              setTurnstileToken(null);
+            }}
+            onExpired={() => {
+              setCaptchaLoading(true);
+              setTurnstileToken(null);
+            }}
           />
 
           <button
@@ -107,6 +119,9 @@ export default function LoginPage() {
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>
+          {captchaLoading && !turnstileToken && (
+            <p className="text-xs text-muted-foreground text-center">Initializing security check...</p>
+          )}
         </form>
 
         <p className="mt-6 text-center text-sm">
