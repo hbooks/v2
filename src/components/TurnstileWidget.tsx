@@ -1,11 +1,10 @@
-// src/components/TurnstileWidget.tsx
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 
 interface TurnstileWidgetProps {
   onSuccess: (token: string) => void;
   onError?: () => void;
   onExpired?: () => void;
-  reset?: number; // Change this prop to force reset
+  reset?: number;
 }
 
 declare global {
@@ -18,8 +17,18 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
   const containerRef = useRef<HTMLDivElement>(null);
   const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
   const widgetIdRef = useRef<string | null>(null);
+  const successRef = useRef(onSuccess);
+  const errorRef = useRef(onError);
+  const expiredRef = useRef(onExpired);
 
-  // Load Turnstile script once
+  // Update refs when callbacks change
+  useEffect(() => {
+    successRef.current = onSuccess;
+    errorRef.current = onError;
+    expiredRef.current = onExpired;
+  }, [onSuccess, onError, onExpired]);
+
+  // Load script once
   useEffect(() => {
     if (!siteKey) return;
     if (document.querySelector("#turnstile-script")) return;
@@ -38,7 +47,6 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
 
     const renderWidget = () => {
       if (!containerRef.current) return;
-      // Clear previous widget if exists
       if (widgetIdRef.current) {
         try {
           window.turnstile.remove(widgetIdRef.current);
@@ -47,16 +55,13 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
       widgetIdRef.current = window.turnstile.render(containerRef.current, {
         sitekey: siteKey,
         callback: (token: string) => {
-          console.log("Turnstile token generated");
-          onSuccess(token);
+          successRef.current(token);
         },
         "error-callback": () => {
-          console.error("Turnstile error");
-          onError?.();
+          errorRef.current?.();
         },
         "expired-callback": () => {
-          console.warn("Turnstile expired");
-          onExpired?.();
+          expiredRef.current?.();
         },
         theme: "light",
       });
@@ -68,8 +73,8 @@ export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }
       window.addEventListener("load", renderWidget);
       return () => window.removeEventListener("load", renderWidget);
     }
-  }, [siteKey, reset, onSuccess, onError, onExpired]);
+  }, [siteKey, reset]);
 
-  if (!siteKey) return <div className="text-destructive">Missing Turnstile key</div>;
+  if (!siteKey) return <div className="text-destructive text-sm">Missing Turnstile key</div>;
   return <div ref={containerRef} />;
 }
