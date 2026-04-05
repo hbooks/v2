@@ -1,4 +1,3 @@
-// src/lib/auth-context.tsx
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from './supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
@@ -16,7 +15,6 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string) => Promise<void>;
-  checkIdentifier: (identifier: string) => Promise<{ found: boolean; email: string }>;
   logout: () => Promise<void>;
 }
 
@@ -28,32 +26,38 @@ export const useAuth = () => {
   return ctx;
 };
 
+// Helper to aggressively clear all Supabase-related storage
+const clearAllSupabaseStorage = () => {
+  const allKeys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
+  allKeys.forEach(key => {
+    if (key.includes('supabase') || key.startsWith('sb-') || key.includes('auth-token')) {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    }
+  });
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // start true
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch user profile from members or unverified_users
   const fetchUserProfile = useCallback(async (authUser: SupabaseUser) => {
-    // Timeout after 5 seconds
     const timeoutPromise = new Promise<null>((_, reject) =>
       setTimeout(() => reject(new Error('Profile fetch timed out')), 5000)
     );
 
-    // First try members table
-    const membersPromise = supabase
-      .from('members')
-      .select('username, tag')
-      .eq('id', authUser.id)
-      .single();
+    let profile: { username: string; tag?: string } | null = null;
 
-    let profile = null;
-    let error = null;
     try {
-      const result = await Promise.race([membersPromise, timeoutPromise]) as any;
-      if (result.data) {
-        profile = result.data;
+      const membersPromise = supabase
+        .from('members')
+        .select('username, tag')
+        .eq('id', authUser.id)
+        .single();
+      const memberResult = await Promise.race([membersPromise, timeoutPromise]) as any;
+      if (memberResult.data) {
+        profile = { username: memberResult.data.username, tag: memberResult.data.tag };
       } else {
-        // Try unverified_users
         const unverifiedPromise = supabase
           .from('unverified_users')
           .select('username')
@@ -65,7 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     } catch (err) {
-      console.error('Profile fetch error or timeout:', err);
+      console.error('Profile fetch error:', err);
     }
 
     if (profile) {
@@ -73,11 +77,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         id: authUser.id,
         email: authUser.email!,
         username: profile.username,
-        tag: profile.tag === 'unverified' ? 'unverified' : (profile.tag === 'member' ? 'member' : 'non-member'),
+        tag: profile.tag === 'member' ? 'member' : (profile.tag === 'unverified' ? 'unverified' : 'non-member'),
         isAdmin: authUser.email === 'admin@hpbooks.uk',
       });
     } else {
-      // Fallback – create minimal user from auth metadata
       const username = authUser.user_metadata?.username || authUser.email?.split('@')[0] || 'user';
       setUser({
         id: authUser.id,
@@ -94,12 +97,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const init = async () => {
       setIsLoading(true);
       try {
+        // First, clear any stale user state
+        setUser(null);
         const { data: { session } } = await supabase.auth.getSession();
         if (isMounted && session?.user) {
           await fetchUserProfile(session.user);
+        } else {
+          if (isMounted) setUser(null);
         }
       } catch (err) {
         console.error('Init error:', err);
+        if (isMounted) setUser(null);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -124,30 +132,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [fetchUserProfile]);
 
-  const checkIdentifier = useCallback(async (identifier: string) => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-identifier`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identifier }),
-        }
-      );
-      if (!res.ok) throw new Error('Network error');
-      return await res.json();
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      // The onAuthStateChange will handle setting the user
     } finally {
       setIsLoading(false);
     }
@@ -156,7 +145,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signup = useCallback(async (username: string, email: string, password: string) => {
     setIsLoading(true);
     try {
-      // First check username uniqueness via your edge function or direct query
       const { data: existingMember } = await supabase
         .from('members')
         .select('username')
@@ -181,8 +169,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       if (error) throw error;
 
-      // After signup, insert into unverified_users (you may do this in an edge function)
-      // For simplicity, we do it here, but consider moving to edge function.
       const { data: { user: newUser } } = await supabase.auth.getUser();
       if (newUser) {
         await supabase.from('unverified_users').insert([{ id: newUser.id, email, username }]);
@@ -195,22 +181,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      // Clear all Supabase storage to be safe
-      const keys = Object.keys(localStorage);
-      keys.forEach(key => {
-        if (key.includes('supabase') || key.startsWith('sb-')) localStorage.removeItem(key);
-      });
-      const sessionKeys = Object.keys(sessionStorage);
-      sessionKeys.forEach(key => {
-        if (key.includes('supabase') || key.startsWith('sb-')) sessionStorage.removeItem(key);
-      });
+      // Sign out from Supabase
+      await supabase.auth.signOut();
+      // Aggressively clear all storage
+      clearAllSupabaseStorage();
+      // Reset user state
       setUser(null);
-      // Force hard reload to clear any lingering state
+      // Force a hard reload to clear React state
       window.location.href = '/';
     } catch (err) {
       console.error('Logout error:', err);
+      clearAllSupabaseStorage();
+      setUser(null);
+      window.location.href = '/';
     } finally {
       setIsLoading(false);
     }
@@ -221,9 +204,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isLoading,
     login,
     signup,
-    checkIdentifier,
     logout,
-  }), [user, isLoading, login, signup, checkIdentifier, logout]);
+  }), [user, isLoading, login, signup, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
