@@ -1,4 +1,3 @@
-// src/lib/auth-context.tsx
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { supabase } from "./supabase";
 
@@ -31,7 +30,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function fetchUserData(userId: string, email: string) {
-    // First check members
     const { data: member } = await supabase
       .from("members")
       .select("id, username, email, tag")
@@ -47,7 +45,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Then unverified_users
     const { data: unverified } = await supabase
       .from("unverified_users")
       .select("id, username, email")
@@ -66,7 +63,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchUserData(session.user.id, session.user.email!).finally(() => setLoading(false));
@@ -75,7 +71,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Listen for auth changes
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("Auth state change:", event);
       if (session?.user) {
@@ -118,10 +113,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    setLoading(true); // Prevent flashes while signing out
-    await supabase.auth.signOut();
-    setUser(null);
-    setLoading(false);
+    setLoading(true);
+    try {
+      // 1. Sign out from Supabase Auth
+      await supabase.auth.signOut();
+      
+      // 2. Manually clear all Supabase session data from storage
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes('supabase') || key?.startsWith('sb-')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i);
+        if (key && key.includes('supabase') || key?.startsWith('sb-')) {
+          sessionStorage.removeItem(key);
+        }
+      }
+      
+      // 3. Clear React state
+      setUser(null);
+      
+      // 4. Force a hard reload to reset the entire application
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Logout error:', error);
+      setLoading(false);
+    }
   };
 
   const resendVerification = async () => {
