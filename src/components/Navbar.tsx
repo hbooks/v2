@@ -1,7 +1,7 @@
-// src/components/Navbar.tsx
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BookOpen, ShoppingCart, User, Menu, X, LogOut, LogIn } from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import { useCart } from "@/lib/cart-context";
 
@@ -35,11 +35,15 @@ export default function Navbar() {
     return true;
   });
 
-  const handleLogout = async () => {
+ const handleLogout = async () => {
+  try {
     await logout();
-    setProfileOpen(false);
-    navigate("/");
-  };
+    // The page will reload and redirect to home inside the logout function.
+    // No extra navigation needed.
+  } catch (err) {
+    toast.error("Logout failed");
+  }
+};
 
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
@@ -113,7 +117,7 @@ export default function Navbar() {
                     <>
                       <p className="text-sm font-medium text-foreground">{user?.username ?? "User"}</p>
                       <p className="mb-2 text-xs text-muted-foreground">
-                        {isMember ? "✨ Membership Active" : "No membership active"}
+                        {isMember ? "You currently have a Membership Active" : "No membership is active on your account"}
                       </p>
                       <button
                         onClick={handleLogout}

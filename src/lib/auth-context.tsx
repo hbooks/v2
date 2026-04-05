@@ -30,58 +30,80 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   async function fetchUserData(userId: string, email: string) {
-    const { data: member } = await supabase
-      .from("members")
-      .select("id, username, email, tag")
-      .eq("id", userId)
-      .single();
-    if (member) {
-      setUser({
-        id: member.id,
-        username: member.username,
-        email: member.email,
-        tag: member.tag,
-      });
-      return;
-    }
-
-    const { data: unverified } = await supabase
-      .from("unverified_users")
-      .select("id, username, email")
-      .eq("email", email)
-      .single();
-    if (unverified) {
-      setUser({
-        id: userId,
-        username: unverified.username,
-        email: unverified.email,
-        tag: "unverified",
-      });
-    } else {
+    try {
+      const { data: member } = await supabase
+        .from("members")
+        .select("id, username, email, tag")
+        .eq("id", userId)
+        .maybeSingle();
+      if (member) {
+        setUser({
+          id: member.id,
+          username: member.username,
+          email: member.email,
+          tag: member.tag,
+        });
+        return;
+      }
+      const { data: unverified } = await supabase
+        .from("unverified_users")
+        .select("id, username, email")
+        .eq("email", email)
+        .maybeSingle();
+      if (unverified) {
+        setUser({
+          id: userId,
+          username: unverified.username,
+          email: unverified.email,
+          tag: "unverified",
+        });
+        return;
+      }
+      setUser(null);
+    } catch (err) {
+      console.error("fetchUserData error:", err);
       setUser(null);
     }
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchUserData(session.user.id, session.user.email!).finally(() => setLoading(false));
-      } else {
+    let isMounted = true;
+    const init = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (isMounted) {
+          if (session?.user) {
+            await fetchUserData(session.user.id, session.user.email!);
+          } else {
+            setUser(null);
+          }
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Auth init error:", err);
+        if (isMounted) {
+          setUser(null);
+          setLoading(false);
+        }
+      }
+    };
+    init();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (isMounted) {
+        if (session?.user) {
+          await fetchUserData(session.user.id, session.user.email!);
+        } else {
+          setUser(null);
+        }
         setLoading(false);
       }
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth state change:", event);
-      if (session?.user) {
-        await fetchUserData(session.user.id, session.user.email!);
-      } else {
-        setUser(null);
-      }
-      setLoading(false);
-    });
-
-    return () => listener?.subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      listener?.subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string, turnstileToken: string) => {
@@ -92,7 +114,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
-
     setUser({
       id: data.user.id,
       username: data.user.username,
@@ -115,32 +136,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     setLoading(true);
     try {
-      // 1. Sign out from Supabase Auth
-      await supabase.auth.signOut();
-      
-      // 2. Manually clear all Supabase session data from storage
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.includes('supabase') || key?.startsWith('sb-')) {
-          keysToRemove.push(key);
-        }
-      }
-      keysToRemove.forEach(key => localStorage.removeItem(key));
-      for (let i = 0; i < sessionStorage.length; i++) {
-        const key = sessionStorage.key(i);
-        if (key && key.includes('supabase') || key?.startsWith('sb-')) {
+      // 1. Sign out from Supabase (this invalidates the session on the server)
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+
+      // 2. Aggressively clear all Supabase-related storage
+      const allKeys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
+      allKeys.forEach(key => {
+        if (key.includes('supabase') || key.startsWith('sb-')) {
+          localStorage.removeItem(key);
           sessionStorage.removeItem(key);
         }
-      }
-      
+      });
+
       // 3. Clear React state
       setUser(null);
-      
-      // 4. Force a hard reload to reset the entire application
+
+      // 4. Show success message
+      alert("Successfully logged out!");
+
+      // 5. Force a full page reload to home (clears any remaining memory state)
       window.location.href = '/';
-    } catch (error) {
-      console.error('Logout error:', error);
+    } catch (err) {
+      console.error("Logout error:", err);
+      alert("Logout failed. Please try again.");
       setLoading(false);
     }
   };
