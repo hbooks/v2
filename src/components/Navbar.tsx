@@ -1,5 +1,6 @@
+// src/components/Navbar.tsx
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { BookOpen, ShoppingCart, User, Menu, X, LogOut, LogIn } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useCart } from "@/lib/cart-context";
@@ -18,12 +19,12 @@ export default function Navbar() {
   const { user, isGuest, loading, logout } = useAuth();
   const { totalItems } = useCart();
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
 
   // Wait for auth to load before rendering any user-dependent UI
   if (loading) {
-    // Return a placeholder navbar (same height, no content) to avoid layout shift
     return <div className="h-16 border-b border-border bg-background/80" />;
   }
 
@@ -33,6 +34,12 @@ export default function Navbar() {
     if (isMember && (link.to === "/cart" || link.to === "/membership")) return false;
     return true;
   });
+
+  const handleLogout = async () => {
+    await logout();
+    setProfileOpen(false);
+    navigate("/");
+  };
 
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
@@ -83,7 +90,6 @@ export default function Navbar() {
             >
               <User className="h-5 w-5" />
               <span className="hidden text-sm md:inline">
-                {/* Safe display: use optional chaining and fallback */}
                 {isGuest ? "Guest" : user?.username ?? "User"}
               </span>
             </button>
@@ -110,10 +116,7 @@ export default function Navbar() {
                         {isMember ? "✨ Membership Active" : "No membership active"}
                       </p>
                       <button
-                        onClick={() => {
-                          logout();
-                          setProfileOpen(false);
-                        }}
+                        onClick={handleLogout}
                         className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive hover:bg-secondary"
                       >
                         <LogOut className="h-4 w-4" /> Logout
