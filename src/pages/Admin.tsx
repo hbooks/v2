@@ -1,4 +1,3 @@
-// src/pages/Admin.tsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
@@ -13,7 +12,6 @@ import {
   MessageSquare,
   Newspaper,
   BarChart3,
-  Upload,
   X,
 } from "lucide-react";
 
@@ -25,7 +23,7 @@ type Product = {
   price: number;
   type: "book" | "exclusive";
   stock_status: "in_stock" | "out_of_stock";
-  cover_image_url?: string;
+  images: string[];          // array of image URLs
   file_url?: string;
   created_at: string;
 };
@@ -52,28 +50,25 @@ type Stat = {
   totalMessages: number;
 };
 
-// ---------- Helper: Upload file to Supabase Storage ----------
-async function uploadFile(
-  bucket: string,
-  file: File,
-  path: string
-): Promise<string | null> {
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .upload(path, file, { upsert: true });
-  if (error) {
-    console.error("Upload error:", error);
-    toast.error(`Failed to upload ${file.name}`);
-    return null;
+// ---------- Helper: Upload multiple images ----------
+async function uploadImages(files: FileList, productName: string): Promise<string[]> {
+  const uploadedUrls: string[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const ext = file.name.split(".").pop();
+    const fileName = `${Date.now()}_${productName.replace(/\s/g, "_")}_${i}.${ext}`;
+    const { data, error } = await supabase.storage
+      .from("product-covers")
+      .upload(fileName, file, { upsert: true });
+    if (error) {
+      console.error("Upload error:", error);
+      toast.error(`Failed to upload ${file.name}`);
+      continue;
+    }
+    const { data: publicUrl } = supabase.storage.from("product-covers").getPublicUrl(data.path);
+    uploadedUrls.push(publicUrl.publicUrl);
   }
-  // Return public URL for product-covers, or path for private files
-  if (bucket === "product-covers") {
-    const { data: publicUrl } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(data.path);
-    return publicUrl.publicUrl;
-  }
-  return data.path; // for private bucket (product-files)
+  return uploadedUrls;
 }
 
 // ---------- Main Admin Component ----------
@@ -102,14 +97,15 @@ export default function AdminPage() {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [editingUpdate, setEditingUpdate] = useState<Update | null>(null);
 
-  // Form states
+  // Form states (updated for multiple images)
   const [productForm, setProductForm] = useState({
     name: "",
     description: "",
     price: "",
     type: "book" as "book" | "exclusive",
     stock_status: "in_stock" as "in_stock" | "out_of_stock",
-    cover_image: null as File | null,
+    existingImages: [] as string[],   // already stored URLs
+    newImages: [] as File[],          // new files to upload
     product_file: null as File | null,
   });
   const [updateForm, setUpdateForm] = useState({ title: "", content: "" });
@@ -127,28 +123,24 @@ export default function AdminPage() {
   const fetchAllData = async () => {
     setLoadingData(true);
     try {
-      // Products
       const { data: productsData } = await supabase
         .from("products")
         .select("*")
         .order("created_at", { ascending: false });
       setProducts(productsData || []);
 
-      // Updates
       const { data: updatesData } = await supabase
         .from("updates")
         .select("*")
         .order("created_at", { ascending: false });
       setUpdates(updatesData || []);
 
-      // Contact messages
       const { data: messagesData } = await supabase
         .from("contact_messages")
         .select("*")
         .order("created_at", { ascending: false });
       setMessages(messagesData || []);
 
-      // Stats
       const { count: totalProducts } = await supabase
         .from("products")
         .select("*", { count: "exact", head: true });
@@ -182,7 +174,7 @@ export default function AdminPage() {
     }
   }, [user]);
 
-  // ---------- Product CRUD ----------
+  // ---------- Product CRUD with multiple images ----------
   const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productForm.name || !productForm.price) {
@@ -190,31 +182,22 @@ export default function AdminPage() {
       return;
     }
 
-    let coverUrl = editingProduct?.cover_image_url || "";
-    let filePath = editingProduct?.file_url || "";
-
-    // Upload cover image if new file selected
-    if (productForm.cover_image) {
-      const ext = productForm.cover_image.name.split(".").pop();
-      const fileName = `${Date.now()}_cover.${ext}`;
-      const uploaded = await uploadFile(
-        "product-covers",
-        productForm.cover_image,
-        fileName
-      );
-      if (uploaded) coverUrl = uploaded;
+    let imageUrls = [...productForm.existingImages];
+    // Upload new images
+    if (productForm.newImages.length > 0) {
+      const newUrls = await uploadImages(productForm.newImages as unknown as FileList, productForm.name);
+      imageUrls = [...imageUrls, ...newUrls];
     }
 
-    // Upload product file (ebook) if new file selected
+    let filePath = editingProduct?.file_url || "";
     if (productForm.product_file) {
       const ext = productForm.product_file.name.split(".").pop();
       const fileName = `${Date.now()}_${productForm.name.replace(/\s/g, "_")}.${ext}`;
-      const uploaded = await uploadFile(
-        "product-files",
-        productForm.product_file,
-        fileName
-      );
-      if (uploaded) filePath = uploaded;
+      const { data, error } = await supabase.storage
+        .from("product-files")
+        .upload(fileName, productForm.product_file, { upsert: true });
+      if (!error && data) filePath = data.path;
+      else toast.error("Failed to upload product file");
     }
 
     const productData = {
@@ -223,13 +206,12 @@ export default function AdminPage() {
       price: parseFloat(productForm.price),
       type: productForm.type,
       stock_status: productForm.stock_status,
-      cover_image_url: coverUrl,
+      images: imageUrls,
       file_url: filePath,
     };
 
     let error;
     if (editingProduct) {
-      // Update existing
       const { error: updateErr } = await supabase
         .from("products")
         .update(productData)
@@ -237,7 +219,6 @@ export default function AdminPage() {
       error = updateErr;
       if (!error) toast.success("Product updated");
     } else {
-      // Insert new
       const { error: insertErr } = await supabase
         .from("products")
         .insert([productData]);
@@ -285,7 +266,8 @@ export default function AdminPage() {
         price: product.price.toString(),
         type: product.type,
         stock_status: product.stock_status,
-        cover_image: null,
+        existingImages: product.images || [],
+        newImages: [],
         product_file: null,
       });
     } else {
@@ -302,12 +284,20 @@ export default function AdminPage() {
       price: "",
       type: "book",
       stock_status: "in_stock",
-      cover_image: null,
+      existingImages: [],
+      newImages: [],
       product_file: null,
     });
   };
 
-  // ---------- Update CRUD ----------
+  const removeExistingImage = (urlToRemove: string) => {
+    setProductForm({
+      ...productForm,
+      existingImages: productForm.existingImages.filter(url => url !== urlToRemove),
+    });
+  };
+
+  // ---------- Update CRUD (unchanged) ----------
   const handleUpdateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!updateForm.title || !updateForm.content) {
@@ -474,6 +464,7 @@ export default function AdminPage() {
                 <table className="w-full text-sm">
                   <thead className="border-b border-border bg-secondary/50">
                     <tr>
+                      <th className="px-4 py-3 text-left font-medium">Image</th>
                       <th className="px-4 py-3 text-left font-medium">Name</th>
                       <th className="px-4 py-3 text-left font-medium">Type</th>
                       <th className="px-4 py-3 text-left font-medium">Price</th>
@@ -484,6 +475,19 @@ export default function AdminPage() {
                   <tbody>
                     {products.map((product) => (
                       <tr key={product.id} className="border-b border-border last:border-0">
+                        <td className="px-4 py-3">
+                          {product.images && product.images[0] ? (
+                            <img
+                              src={product.images[0]}
+                              alt=""
+                              className="h-10 w-10 rounded object-cover"
+                            />
+                          ) : (
+                            <div className="h-10 w-10 rounded bg-muted flex items-center justify-center text-muted-foreground text-xs">
+                              No img
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-3 font-medium">{product.name}</td>
                         <td className="px-4 py-3">
                           <span className="rounded-full bg-secondary px-2 py-0.5 text-xs capitalize">
@@ -618,7 +622,7 @@ export default function AdminPage() {
         )}
       </main>
 
-      {/* Product Modal */}
+      {/* Product Modal with multiple image support */}
       {showProductModal && (
         <Modal onClose={() => setShowProductModal(false)}>
           <h3 className="mb-4 font-heading text-xl font-bold">
@@ -665,30 +669,64 @@ export default function AdminPage() {
               <option value="in_stock">In Stock</option>
               <option value="out_of_stock">Out of Stock</option>
             </select>
+
+            {/* Existing images preview with delete option */}
+            {productForm.existingImages.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Current Images</label>
+                <div className="flex flex-wrap gap-2">
+                  {productForm.existingImages.map((url, idx) => (
+                    <div key={idx} className="relative">
+                      <img src={url} alt="" className="h-16 w-16 rounded object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => removeExistingImage(url)}
+                        className="absolute -top-2 -right-2 rounded-full bg-destructive p-0.5 text-white"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Upload new images (multiple) */}
             <div>
-              <label className="block text-sm font-medium mb-1">Cover Image</label>
+              <label className="block text-sm font-medium mb-1">Add New Images (multiple)</label>
               <input
                 type="file"
                 accept="image/*"
-                onChange={(e) => setProductForm({ ...productForm, cover_image: e.target.files?.[0] || null })}
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  setProductForm({ ...productForm, newImages: files });
+                }}
                 className="w-full"
               />
-              {productForm.cover_image && (
-                <p className="text-xs text-muted-foreground mt-1">{productForm.cover_image.name}</p>
+              {productForm.newImages.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {productForm.newImages.length} new file(s) selected
+                </p>
               )}
             </div>
+
+            {/* Product file upload (unchanged) */}
             <div>
               <label className="block text-sm font-medium mb-1">Product File (PDF/EPUB)</label>
               <input
                 type="file"
                 accept=".pdf,.epub"
-                onChange={(e) => setProductForm({ ...productForm, product_file: e.target.files?.[0] || null })}
+                onChange={(e) =>
+                  setProductForm({ ...productForm, product_file: e.target.files?.[0] || null })
+                }
                 className="w-full"
               />
               {productForm.product_file && (
                 <p className="text-xs text-muted-foreground mt-1">{productForm.product_file.name}</p>
               )}
             </div>
+
             <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -708,7 +746,7 @@ export default function AdminPage() {
         </Modal>
       )}
 
-      {/* Update Modal */}
+      {/* Update Modal (unchanged) */}
       {showUpdateModal && (
         <Modal onClose={() => setShowUpdateModal(false)}>
           <h3 className="mb-4 font-heading text-xl font-bold">
