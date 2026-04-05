@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# updates
 
-TODO: Document your project here
+1. v1.0.0
