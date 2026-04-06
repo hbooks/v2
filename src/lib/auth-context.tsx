@@ -16,6 +16,7 @@ interface AuthContextType {
   login: (email: string, password: string, turnstileToken: string) => Promise<void>;
   signup: (username: string, email: string, password: string, turnstileToken: string) => Promise<void>;
   logout: () => Promise<void>;
+  resendVerification: () => Promise<void>; 
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -86,6 +87,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     init();
   }, [fetchUserFromToken]);
 
+  // Resend verification email
+   const resendVerification = useCallback(async () => {
+    if (!user?.email) throw new Error("No email found");
+    const { error } = await supabase.auth.resend({ type: "signup", email: user.email });
+    if (error) throw error;
+  }, [user]);
+
   const login = useCallback(async (email: string, password: string, turnstileToken: string) => {
     setIsLoading(true);
     try {
@@ -151,7 +159,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     login,
     signup,
     logout,
-  }), [user, isGuest, isLoading, login, signup, logout]);
+    resendVerification,
+  }), [user, isGuest, isLoading, login, signup, logout, resendVerification]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
