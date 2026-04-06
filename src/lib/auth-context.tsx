@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from './supabase';
-import { User as SupabaseUser } from '@supabase/supabase-js';
 
 interface User {
   id: string;
@@ -12,9 +11,10 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
+  isGuest: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (username: string, email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, turnstileToken: string) => Promise<void>;
+  signup: (username: string, email: string, password: string, turnstileToken: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -26,8 +26,7 @@ export const useAuth = () => {
   return ctx;
 };
 
-// Helper to aggressively clear all Supabase-related storage
-const clearAllSupabaseStorage = () => {
+const clearAllAuthStorage = () => {
   const allKeys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
   allKeys.forEach(key => {
     if (key.includes('supabase') || key.startsWith('sb-') || key.includes('auth-token')) {
@@ -41,54 +40,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchUserProfile = useCallback(async (authUser: SupabaseUser) => {
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error('Profile fetch timed out')), 5000)
-    );
-
-    let profile: { username: string; tag?: string } | null = null;
-
+  // Validate that a user exists in our DB and return profile, or null
+  const validateAndFetchProfile = useCallback(async (authUser: any): Promise<User | null> => {
     try {
-      const membersPromise = supabase
+      // Check members table
+      const { data: member } = await supabase
         .from('members')
         .select('username, tag')
         .eq('id', authUser.id)
         .single();
-      const memberResult = await Promise.race([membersPromise, timeoutPromise]) as any;
-      if (memberResult.data) {
-        profile = { username: memberResult.data.username, tag: memberResult.data.tag };
-      } else {
-        const unverifiedPromise = supabase
-          .from('unverified_users')
-          .select('username')
-          .eq('email', authUser.email!)
-          .single();
-        const unverifiedResult = await Promise.race([unverifiedPromise, timeoutPromise]) as any;
-        if (unverifiedResult.data) {
-          profile = { username: unverifiedResult.data.username, tag: 'unverified' };
-        }
+      if (member) {
+        return {
+          id: authUser.id,
+          email: authUser.email,
+          username: member.username,
+          tag: member.tag,
+          isAdmin: authUser.email === 'admin@hpbooks.uk',
+        };
       }
+      // Check unverified_users
+      const { data: unverified } = await supabase
+        .from('unverified_users')
+        .select('username')
+        .eq('email', authUser.email)
+        .single();
+      if (unverified) {
+        return {
+          id: authUser.id,
+          email: authUser.email,
+          username: unverified.username,
+          tag: 'unverified',
+          isAdmin: authUser.email === 'admin@hpbooks.uk',
+        };
+      }
+      // User not found in our DB – return null
+      return null;
     } catch (err) {
-      console.error('Profile fetch error:', err);
-    }
-
-    if (profile) {
-      setUser({
-        id: authUser.id,
-        email: authUser.email!,
-        username: profile.username,
-        tag: profile.tag === 'member' ? 'member' : (profile.tag === 'unverified' ? 'unverified' : 'non-member'),
-        isAdmin: authUser.email === 'admin@hpbooks.uk',
-      });
-    } else {
-      const username = authUser.user_metadata?.username || authUser.email?.split('@')[0] || 'user';
-      setUser({
-        id: authUser.id,
-        email: authUser.email!,
-        username,
-        tag: 'non-member',
-        isAdmin: authUser.email === 'admin@hpbooks.uk',
-      });
+      console.warn('Profile fetch failed:', err);
+      return null;
     }
   }, []);
 
@@ -97,17 +86,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const init = async () => {
       setIsLoading(true);
       try {
-        // First, clear any stale user state
+        // Start with guest
         setUser(null);
         const { data: { session } } = await supabase.auth.getSession();
         if (isMounted && session?.user) {
-          await fetchUserProfile(session.user);
-        } else {
-          if (isMounted) setUser(null);
+          const profile = await validateAndFetchProfile(session.user);
+          if (profile) {
+            setUser(profile);
+          } else {
+            // Invalid session – sign out and clear storage
+            await supabase.auth.signOut();
+            clearAllAuthStorage();
+          }
         }
       } catch (err) {
-        console.error('Init error:', err);
-        if (isMounted) setUser(null);
+        console.error('Auth init error:', err);
+        clearAllAuthStorage();
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -118,7 +112,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!isMounted) return;
       if (event === 'SIGNED_IN' && session?.user) {
         setIsLoading(true);
-        await fetchUserProfile(session.user);
+        const profile = await validateAndFetchProfile(session.user);
+        if (profile) {
+          setUser(profile);
+        } else {
+          // Signed in with a user not in our DB – force sign out
+          await supabase.auth.signOut();
+          clearAllAuthStorage();
+          setUser(null);
+        }
         setIsLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -130,49 +132,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isMounted = false;
       listener?.subscription.unsubscribe();
     };
-  }, [fetchUserProfile]);
+  }, [validateAndFetchProfile]);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, turnstileToken: string) => {
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+      // You need to call your edge function that verifies Turnstile and signs in
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, turnstileToken }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      // The edge function returns session – set it
+      await supabase.auth.setSession(data.session);
+      // Profile will be fetched by onAuthStateChange
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  const signup = useCallback(async (username: string, email: string, password: string) => {
+  const signup = useCallback(async (username: string, email: string, password: string, turnstileToken: string) => {
     setIsLoading(true);
     try {
-      const { data: existingMember } = await supabase
-        .from('members')
-        .select('username')
-        .eq('username', username)
-        .maybeSingle();
-      const { data: existingUnverified } = await supabase
-        .from('unverified_users')
-        .select('username')
-        .eq('username', username)
-        .maybeSingle();
-      if (existingMember || existingUnverified) {
-        throw new Error('Username already taken');
-      }
-
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { username },
-          emailRedirectTo: `${window.location.origin}/verify-email`,
-        },
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, email, password, turnstileToken }),
       });
-      if (error) throw error;
-
-      const { data: { user: newUser } } = await supabase.auth.getUser();
-      if (newUser) {
-        await supabase.from('unverified_users').insert([{ id: newUser.id, email, username }]);
-      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
     } finally {
       setIsLoading(false);
     }
@@ -181,17 +171,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Sign out from Supabase
       await supabase.auth.signOut();
-      // Aggressively clear all storage
-      clearAllSupabaseStorage();
-      // Reset user state
+      clearAllAuthStorage();
       setUser(null);
-      // Force a hard reload to clear React state
       window.location.href = '/';
     } catch (err) {
       console.error('Logout error:', err);
-      clearAllSupabaseStorage();
+      clearAllAuthStorage();
       setUser(null);
       window.location.href = '/';
     } finally {
@@ -199,13 +185,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const isGuest = user === null && !isLoading;
+
   const value = useMemo(() => ({
     user,
+    isGuest,
     isLoading,
     login,
     signup,
     logout,
-  }), [user, isLoading, login, signup, logout]);
+  }), [user, isGuest, isLoading, login, signup, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
