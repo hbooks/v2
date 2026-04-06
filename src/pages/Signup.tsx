@@ -53,6 +53,8 @@ export default function SignupPage() {
       await signup(username, email, password, turnstileToken);
       toast.success("Verification email sent! Check your inbox.");
       navigate("/verify-email", { state: { email } });
+      sessionStorage.setItem("pendingVerificationEmail", email);
+      navigate("/Aok");
     } catch (err: any) {
       toast.error(err.message || "Sign up failed");
       // Reset Turnstile on error

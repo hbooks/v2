@@ -1,49 +1,42 @@
+// src/pages/Aok.tsx
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth-context";
-import { CheckCircle, XCircle, Loader2, Mail, RefreshCw } from "lucide-react";
+import { CheckCircle, Loader2, XCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
-export default function VerifyEmailPage() {
-  const [searchParams] = useSearchParams();
+export default function AokPage() {
   const navigate = useNavigate();
-  const { user, resendVerification } = useAuth();
-  const [status, setStatus] = useState<"loading" | "success" | "error" | "no_token">("loading");
+  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [countdown, setCountdown] = useState(3);
   const [resending, setResending] = useState(false);
+  const [email, setEmail] = useState("");
 
+  // On mount, check if the user is now verified
   useEffect(() => {
-    const token = searchParams.get("token");
-    const type = searchParams.get("type");
-
-    console.log("🔑 Token from URL:", token);
-    console.log("📝 Type from URL:", type);
-
-    if (!token || type !== "signup") {
-      setStatus("no_token");
-      return;
-    }
-
-    const verifyEmail = async () => {
+    const checkVerification = async () => {
       try {
-        const { data, error } = await supabase.auth.verifyOtp({
-          token_hash: token,
-          type: "signup",
-        });
-        if (error) throw error;
-        console.log("✅ Verification successful:", data);
-        setStatus("success");
-        toast.success("Email verified successfully!");
-      } catch (err: any) {
-        console.error("❌ Verification error:", err);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.email_confirmed_at) {
+          setStatus("success");
+          toast.success("Email verified successfully!");
+        } else if (user?.email) {
+          // User exists but not verified – store email for resend
+          setEmail(user.email);
+          setStatus("error");
+        } else {
+          // No user – maybe they aren't logged in; try to get email from sessionStorage
+          const storedEmail = sessionStorage.getItem("pendingVerificationEmail");
+          if (storedEmail) setEmail(storedEmail);
+          setStatus("error");
+        }
+      } catch (err) {
+        console.error(err);
         setStatus("error");
-        toast.error(err.message || "Verification failed. The link may be invalid or expired.");
       }
     };
-
-    verifyEmail();
-  }, [searchParams]);
+    checkVerification();
+  }, []);
 
   // Auto‑redirect after success
   useEffect(() => {
@@ -57,9 +50,17 @@ export default function VerifyEmailPage() {
   }, [status, countdown, navigate]);
 
   const handleResend = async () => {
+    if (!email) {
+      toast.error("Email address not found. Please sign up again.");
+      return;
+    }
     setResending(true);
     try {
-      await resendVerification();
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email,
+      });
+      if (error) throw error;
       toast.success("Verification email resent! Check your inbox.");
     } catch (err: any) {
       toast.error(err.message || "Failed to resend verification email.");
@@ -68,7 +69,6 @@ export default function VerifyEmailPage() {
     }
   };
 
-  // Case: verifying token
   if (status === "loading") {
     return (
       <div className="flex min-h-[80vh] flex-col items-center justify-center gap-4">
@@ -78,7 +78,6 @@ export default function VerifyEmailPage() {
     );
   }
 
-  // Case: success
   if (status === "success") {
     return (
       <div className="flex min-h-[80vh] flex-col items-center justify-center gap-4">
@@ -89,7 +88,7 @@ export default function VerifyEmailPage() {
         <p className="text-center text-muted-foreground">
           Your account has been successfully verified.
           <br />
-          Redirecting you to the login page in <span className="font-bold text-primary">{countdown}</span> seconds...
+          Redirecting to the login page in <span className="font-bold text-primary">{countdown}</span> seconds...
         </p>
         <button
           onClick={() => navigate("/login")}
@@ -101,34 +100,15 @@ export default function VerifyEmailPage() {
     );
   }
 
-  // Case: error during verification (token present but invalid)
-  if (status === "error") {
-    return (
-      <div className="flex min-h-[80vh] flex-col items-center justify-center gap-4 px-4">
-        <XCircle className="h-16 w-16 text-destructive" />
-        <h1 className="text-2xl font-bold text-foreground">Verification Failed</h1>
-        <p className="max-w-md text-center text-muted-foreground">
-          The verification link is invalid or has expired.
-        </p>
-        <button
-          onClick={() => navigate("/signup")}
-          className="mt-4 rounded-md bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground"
-        >
-          Sign Up Again
-        </button>
-      </div>
-    );
-  }
-
-  // Case: no token in URL – user arrived manually
+  // Error state – user not verified
   return (
     <div className="flex min-h-[80vh] flex-col items-center justify-center gap-4 px-4">
-      <Mail className="h-16 w-16 text-primary" />
-      <h1 className="text-2xl font-bold text-foreground">Verify Your Email</h1>
+      <XCircle className="h-16 w-16 text-destructive" />
+      <h1 className="text-2xl font-bold text-foreground">Verification Failed</h1>
       <p className="max-w-md text-center text-muted-foreground">
-        Please check your email inbox (and spam folder) for the verification link.
+        The verification link is invalid or has expired, or your email is not yet confirmed.
       </p>
-      {user?.email && (
+      {email && (
         <button
           onClick={handleResend}
           disabled={resending}
@@ -139,10 +119,10 @@ export default function VerifyEmailPage() {
         </button>
       )}
       <button
-        onClick={() => navigate("/login")}
+        onClick={() => navigate("/signup")}
         className="mt-2 text-sm text-muted-foreground underline hover:text-foreground"
       >
-        Back to Login
+        Sign Up Again
       </button>
     </div>
   );
