@@ -1,7 +1,5 @@
-// src/lib/auth-context.tsx
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from './supabase';
-import { toast } from 'sonner';
 
 interface User {
   id: string;
@@ -28,8 +26,8 @@ export const useAuth = () => {
   return ctx;
 };
 
-// Clear all Supabase-related storage
-const nukeStorage = () => {
+// Helper to clear all storage
+const clearStorage = () => {
   const keys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
   keys.forEach(key => {
     if (key.includes('supabase') || key.includes('sb-') || key.includes('auth-token')) {
@@ -43,108 +41,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Validate user against database
-  const fetchUserFromDb = useCallback(async (authUser: any): Promise<User | null> => {
+  // Call the auth-status edge function to get the current user from the token
+  const fetchUserFromToken = useCallback(async (token: string): Promise<User | null> => {
     try {
-      // Check members
-      const { data: member } = await supabase
-        .from('members')
-        .select('username, tag')
-        .eq('id', authUser.id)
-        .maybeSingle();
-      if (member) {
-        return {
-          id: authUser.id,
-          email: authUser.email,
-          username: member.username,
-          tag: member.tag,
-          isAdmin: authUser.email === 'admin@hpbooks.uk',
-        };
-      }
-      // Check unverified
-      const { data: unverified } = await supabase
-        .from('unverified_users')
-        .select('username')
-        .eq('email', authUser.email)
-        .maybeSingle();
-      if (unverified) {
-        return {
-          id: authUser.id,
-          email: authUser.email,
-          username: unverified.username,
-          tag: 'unverified',
-          isAdmin: authUser.email === 'admin@hpbooks.uk',
-        };
-      }
-      return null;
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      return data.user;
     } catch (err) {
-      console.warn('DB fetch error:', err);
+      console.error('fetchUserFromToken error:', err);
       return null;
     }
   }, []);
 
-  // Force logout and reload
-  const forceLogout = useCallback(async () => {
-    nukeStorage();
-    await supabase.auth.signOut();
-    setUser(null);
-    window.location.href = '/';
-  }, []);
-
-  // Initialize session
+  // On app load, try to get session from Supabase and validate
   useEffect(() => {
     let isMounted = true;
     const init = async () => {
       setIsLoading(true);
       try {
-        setUser(null); // start as guest
+        // Get session from Supabase (this is still needed to get the token)
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const dbUser = await fetchUserFromDb(session.user);
-          if (dbUser) {
-            if (isMounted) setUser(dbUser);
-          } else {
-            // Invalid session – clear it
-            await forceLogout();
-            return;
+        if (session?.access_token) {
+          const userData = await fetchUserFromToken(session.access_token);
+          if (userData && isMounted) setUser(userData);
+          else {
+            // Invalid session – clear storage
+            clearStorage();
+            await supabase.auth.signOut();
+            if (isMounted) setUser(null);
           }
+        } else {
+          if (isMounted) setUser(null);
         }
       } catch (err) {
         console.error('Init error:', err);
-        nukeStorage();
+        clearStorage();
+        if (isMounted) setUser(null);
       } finally {
         if (isMounted) setIsLoading(false);
       }
     };
     init();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!isMounted) return;
-      if (event === 'SIGNED_IN' && session?.user) {
-        setIsLoading(true);
-        const dbUser = await fetchUserFromDb(session.user);
-        if (dbUser) {
-          setUser(dbUser);
-          setIsLoading(false);
-        } else {
-          // Signed in with a user not in DB – force logout
-          await forceLogout();
-        }
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setIsLoading(false);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      listener?.subscription.unsubscribe();
-    };
-  }, [fetchUserFromDb, forceLogout]);
+  }, [fetchUserFromToken]);
 
   const login = useCallback(async (email: string, password: string, turnstileToken: string) => {
     setIsLoading(true);
     try {
+      // Call your existing login edge function
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -152,17 +97,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
-      // Set session – this will trigger onAuthStateChange
+      // Set the session in Supabase (this stores the token in localStorage)
       await supabase.auth.setSession(data.session);
-      // Wait a moment for the event to fire
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Now fetch the user using the token
+      const userData = await fetchUserFromToken(data.session.access_token);
+      setUser(userData);
     } catch (err: any) {
       console.error('Login error:', err);
       throw err;
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fetchUserFromToken]);
 
   const signup = useCallback(async (username: string, email: string, password: string, turnstileToken: string) => {
     setIsLoading(true);
@@ -174,9 +120,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
-      toast.success('Verification email sent! Check your inbox.');
-    } catch (err: any) {
-      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -186,12 +129,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       await supabase.auth.signOut();
-      nukeStorage();
+      clearStorage();
       setUser(null);
       window.location.href = '/';
     } catch (err) {
       console.error('Logout error:', err);
-      nukeStorage();
+      clearStorage();
       setUser(null);
       window.location.href = '/';
     } finally {
