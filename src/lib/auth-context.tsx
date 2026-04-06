@@ -1,5 +1,7 @@
+// src/lib/auth-context.tsx
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from './supabase';
+import { toast } from 'sonner';
 
 interface User {
   id: string;
@@ -26,8 +28,8 @@ export const useAuth = () => {
   return ctx;
 };
 
-// Aggressively clear all Supabase storage
-const nukeSupabaseStorage = () => {
+// Clear all Supabase-related storage
+const nukeStorage = () => {
   const keys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
   keys.forEach(key => {
     if (key.includes('supabase') || key.includes('sb-') || key.includes('auth-token')) {
@@ -41,10 +43,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Validate user against database – returns null if not found
-  const validateUser = useCallback(async (authUser: any): Promise<User | null> => {
+  // Validate user against database
+  const fetchUserFromDb = useCallback(async (authUser: any): Promise<User | null> => {
     try {
-      // Check members table using maybeSingle() (no error if not found)
+      // Check members
       const { data: member } = await supabase
         .from('members')
         .select('username, tag')
@@ -59,7 +61,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           isAdmin: authUser.email === 'admin@hpbooks.uk',
         };
       }
-      // Check unverified_users
+      // Check unverified
       const { data: unverified } = await supabase
         .from('unverified_users')
         .select('username')
@@ -76,19 +78,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return null;
     } catch (err) {
-      console.warn('Validation error:', err);
+      console.warn('DB fetch error:', err);
       return null;
     }
   }, []);
 
-  // Force logout and clear everything
+  // Force logout and reload
   const forceLogout = useCallback(async () => {
-    nukeSupabaseStorage();
+    nukeStorage();
     await supabase.auth.signOut();
     setUser(null);
     window.location.href = '/';
   }, []);
 
+  // Initialize session
   useEffect(() => {
     let isMounted = true;
     const init = async () => {
@@ -97,19 +100,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null); // start as guest
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          const validUser = await validateUser(session.user);
-          if (validUser) {
-            if (isMounted) setUser(validUser);
+          const dbUser = await fetchUserFromDb(session.user);
+          if (dbUser) {
+            if (isMounted) setUser(dbUser);
           } else {
-            // Invalid session – nuke it
-            console.warn('Stale session detected, clearing...');
+            // Invalid session – clear it
             await forceLogout();
             return;
           }
         }
       } catch (err) {
         console.error('Init error:', err);
-        nukeSupabaseStorage();
+        nukeStorage();
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -120,14 +122,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!isMounted) return;
       if (event === 'SIGNED_IN' && session?.user) {
         setIsLoading(true);
-        const validUser = await validateUser(session.user);
-        if (validUser) {
-          setUser(validUser);
+        const dbUser = await fetchUserFromDb(session.user);
+        if (dbUser) {
+          setUser(dbUser);
+          setIsLoading(false);
         } else {
           // Signed in with a user not in DB – force logout
           await forceLogout();
         }
-        setIsLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setIsLoading(false);
@@ -138,7 +140,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isMounted = false;
       listener?.subscription.unsubscribe();
     };
-  }, [validateUser, forceLogout]);
+  }, [fetchUserFromDb, forceLogout]);
 
   const login = useCallback(async (email: string, password: string, turnstileToken: string) => {
     setIsLoading(true);
@@ -150,7 +152,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
+      // Set session – this will trigger onAuthStateChange
       await supabase.auth.setSession(data.session);
+      // Wait a moment for the event to fire
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (err: any) {
+      console.error('Login error:', err);
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -166,6 +174,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
+      toast.success('Verification email sent! Check your inbox.');
+    } catch (err: any) {
+      throw err;
     } finally {
       setIsLoading(false);
     }
@@ -175,12 +186,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       await supabase.auth.signOut();
-      nukeSupabaseStorage();
+      nukeStorage();
       setUser(null);
       window.location.href = '/';
     } catch (err) {
       console.error('Logout error:', err);
-      nukeSupabaseStorage();
+      nukeStorage();
       setUser(null);
       window.location.href = '/';
     } finally {

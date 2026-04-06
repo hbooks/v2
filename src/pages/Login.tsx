@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [captchaLoading, setCaptchaLoading] = useState(true);
   const [turnstileReset, setTurnstileReset] = useState(0);
 
+  // Redirect when user becomes available
   useEffect(() => {
     if (!authLoading && user) {
       if (user.tag === "member") navigate("/member-shop");
@@ -38,9 +39,10 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password, turnstileToken);
-      toast.success("Welcome back!");
+      // Redirect will happen via useEffect
     } catch (err: any) {
       toast.error(err.message || "Login failed");
+      // Reset captcha
       setTurnstileToken(null);
       setCaptchaLoading(true);
       setTurnstileReset(prev => prev + 1);
@@ -50,7 +52,7 @@ export default function LoginPage() {
   };
 
   if (authLoading) return <div className="flex min-h-[80vh] items-center justify-center">Loading...</div>;
-  if (user) return null;
+  if (user) return null; // Will redirect via useEffect
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center px-4">
@@ -80,7 +82,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
                 className="w-full rounded-md border border-input bg-background px-3 py-2.5 pr-10 text-sm"
-                placeholder="*********"
+                placeholder="********"
                 required
               />
               <button
@@ -118,7 +120,7 @@ export default function LoginPage() {
           </button>
           {captchaLoading && !turnstileToken && (
             <p className="text-xs text-center text-muted-foreground mt-2">
-              Captcha security is running, please wait...
+              Confirming you are not a robot, please wait...
             </p>
           )}
         </form>
