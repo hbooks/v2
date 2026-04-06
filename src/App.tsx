@@ -14,6 +14,7 @@ import Exclusive from "./pages/Exclusive";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import VerifyEmail from "./pages/VerifyEmail";
+import Aok from "./pages/Aok";
 import UnverifiedShop from "./pages/UnverifiedShop";
 import MemberShop from "./pages/MemberShop";
 import Cart from "./pages/Cart";
@@ -62,6 +63,7 @@ function AppContent() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="/Aok" element={<Aok />} />
           <Route path="/unverified-shop" element={<UnverifiedShop />} />
           <Route path="/member-shop" element={<MemberShop />} />
           <Route path="/cart" element={<Cart />} />
