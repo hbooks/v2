@@ -1,4 +1,3 @@
-// src/pages/Signup.tsx
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
@@ -17,6 +16,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [usernameError, setUsernameError] = useState("");
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [captchaLoading, setCaptchaLoading] = useState(true);
   const [turnstileReset, setTurnstileReset] = useState(0);
 
   const validateUsername = (val: string) => {
@@ -132,11 +132,20 @@ export default function SignupPage() {
             />
           </div>
 
-          <TurnstileWidget
+           <TurnstileWidget
             key={turnstileReset}
-            onSuccess={setTurnstileToken}
-            onError={() => setTurnstileToken(null)}
-            onExpired={() => setTurnstileToken(null)}
+            onSuccess={(token) => {
+              setTurnstileToken(token);
+              setCaptchaLoading(false);
+            }}
+            onError={() => {
+              setTurnstileToken(null);
+              setCaptchaLoading(true);
+            }}
+            onExpired={() => {
+              setTurnstileToken(null);
+              setCaptchaLoading(true);
+            }}
           />
 
           <button
@@ -144,8 +153,13 @@ export default function SignupPage() {
             disabled={loading || !turnstileToken || !!usernameError}
             className="w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            {loading ? "Creating account..." : "Create Account"}
+            {loading ? "Creating account..." : captchaLoading ? "Security check running..." : "Create Account"}
           </button>
+          {captchaLoading && !turnstileToken && (
+            <p className="text-xs text-center text-muted-foreground mt-2">
+              Confirming you're not a robot, please wait...
+            </p>
+          )}
         </form>
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
