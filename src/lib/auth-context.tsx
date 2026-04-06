@@ -26,10 +26,11 @@ export const useAuth = () => {
   return ctx;
 };
 
-const clearAllAuthStorage = () => {
-  const allKeys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
-  allKeys.forEach(key => {
-    if (key.includes('supabase') || key.startsWith('sb-') || key.includes('auth-token')) {
+// Aggressively clear all Supabase storage
+const nukeSupabaseStorage = () => {
+  const keys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)];
+  keys.forEach(key => {
+    if (key.includes('supabase') || key.includes('sb-') || key.includes('auth-token')) {
       localStorage.removeItem(key);
       sessionStorage.removeItem(key);
     }
@@ -40,15 +41,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Validate that a user exists in our DB and return profile, or null
-  const validateAndFetchProfile = useCallback(async (authUser: any): Promise<User | null> => {
+  // Validate user against database – returns null if not found
+  const validateUser = useCallback(async (authUser: any): Promise<User | null> => {
     try {
-      // Check members table
+      // Check members table using maybeSingle() (no error if not found)
       const { data: member } = await supabase
         .from('members')
         .select('username, tag')
         .eq('id', authUser.id)
-        .single();
+        .maybeSingle();
       if (member) {
         return {
           id: authUser.id,
@@ -63,7 +64,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .from('unverified_users')
         .select('username')
         .eq('email', authUser.email)
-        .single();
+        .maybeSingle();
       if (unverified) {
         return {
           id: authUser.id,
@@ -73,12 +74,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           isAdmin: authUser.email === 'admin@hpbooks.uk',
         };
       }
-      // User not found in our DB – return null
       return null;
     } catch (err) {
-      console.warn('Profile fetch failed:', err);
+      console.warn('Validation error:', err);
       return null;
     }
+  }, []);
+
+  // Force logout and clear everything
+  const forceLogout = useCallback(async () => {
+    nukeSupabaseStorage();
+    await supabase.auth.signOut();
+    setUser(null);
+    window.location.href = '/';
   }, []);
 
   useEffect(() => {
@@ -86,22 +94,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const init = async () => {
       setIsLoading(true);
       try {
-        // Start with guest
-        setUser(null);
+        setUser(null); // start as guest
         const { data: { session } } = await supabase.auth.getSession();
-        if (isMounted && session?.user) {
-          const profile = await validateAndFetchProfile(session.user);
-          if (profile) {
-            setUser(profile);
+        if (session?.user) {
+          const validUser = await validateUser(session.user);
+          if (validUser) {
+            if (isMounted) setUser(validUser);
           } else {
-            // Invalid session – sign out and clear storage
-            await supabase.auth.signOut();
-            clearAllAuthStorage();
+            // Invalid session – nuke it
+            console.warn('Stale session detected, clearing...');
+            await forceLogout();
+            return;
           }
         }
       } catch (err) {
-        console.error('Auth init error:', err);
-        clearAllAuthStorage();
+        console.error('Init error:', err);
+        nukeSupabaseStorage();
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -112,14 +120,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!isMounted) return;
       if (event === 'SIGNED_IN' && session?.user) {
         setIsLoading(true);
-        const profile = await validateAndFetchProfile(session.user);
-        if (profile) {
-          setUser(profile);
+        const validUser = await validateUser(session.user);
+        if (validUser) {
+          setUser(validUser);
         } else {
-          // Signed in with a user not in our DB – force sign out
-          await supabase.auth.signOut();
-          clearAllAuthStorage();
-          setUser(null);
+          // Signed in with a user not in DB – force logout
+          await forceLogout();
         }
         setIsLoading(false);
       } else if (event === 'SIGNED_OUT') {
@@ -132,12 +138,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isMounted = false;
       listener?.subscription.unsubscribe();
     };
-  }, [validateAndFetchProfile]);
+  }, [validateUser, forceLogout]);
 
   const login = useCallback(async (email: string, password: string, turnstileToken: string) => {
     setIsLoading(true);
     try {
-      // You need to call your edge function that verifies Turnstile and signs in
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -145,9 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
-      // The edge function returns session – set it
       await supabase.auth.setSession(data.session);
-      // Profile will be fetched by onAuthStateChange
     } finally {
       setIsLoading(false);
     }
@@ -172,12 +175,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       await supabase.auth.signOut();
-      clearAllAuthStorage();
+      nukeSupabaseStorage();
       setUser(null);
       window.location.href = '/';
     } catch (err) {
       console.error('Logout error:', err);
-      clearAllAuthStorage();
+      nukeSupabaseStorage();
       setUser(null);
       window.location.href = '/';
     } finally {

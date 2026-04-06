@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [captchaLoading, setCaptchaLoading] = useState(true);
   const [turnstileReset, setTurnstileReset] = useState(0);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export default function LoginPage() {
       return;
     }
     if (!turnstileToken) {
-      toast.error("Security check still loading, please wait...");
+      toast.error("Security check still running, please wait...");
       return;
     }
 
@@ -41,6 +42,7 @@ export default function LoginPage() {
     } catch (err: any) {
       toast.error(err.message || "Login failed");
       setTurnstileToken(null);
+      setCaptchaLoading(true);
       setTurnstileReset(prev => prev + 1);
     } finally {
       setLoading(false);
@@ -78,7 +80,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
                 className="w-full rounded-md border border-input bg-background px-3 py-2.5 pr-10 text-sm"
-                placeholder="••••••••"
+                placeholder="*********"
                 required
               />
               <button
@@ -93,9 +95,18 @@ export default function LoginPage() {
 
           <TurnstileWidget
             key={turnstileReset}
-            onSuccess={setTurnstileToken}
-            onError={() => setTurnstileToken(null)}
-            onExpired={() => setTurnstileToken(null)}
+            onSuccess={(token) => {
+              setTurnstileToken(token);
+              setCaptchaLoading(false);
+            }}
+            onError={() => {
+              setTurnstileToken(null);
+              setCaptchaLoading(true);
+            }}
+            onExpired={() => {
+              setTurnstileToken(null);
+              setCaptchaLoading(true);
+            }}
           />
 
           <button
@@ -103,8 +114,13 @@ export default function LoginPage() {
             disabled={loading || !turnstileToken}
             className="w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? "Signing in..." : captchaLoading ? "Security check running..." : "Sign In"}
           </button>
+          {captchaLoading && !turnstileToken && (
+            <p className="text-xs text-center text-muted-foreground mt-2">
+              Captcha security is running, please wait...
+            </p>
+          )}
         </form>
 
         <p className="mt-6 text-center text-sm">
