@@ -1,5 +1,4 @@
-// src/pages/Aok.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { CheckCircle, Loader2, XCircle, RefreshCw } from "lucide-react";
@@ -11,23 +10,45 @@ export default function AokPage() {
   const [countdown, setCountdown] = useState(3);
   const [resending, setResending] = useState(false);
   const [email, setEmail] = useState("");
+  const movedRef = useRef(false); // prevent multiple calls
 
-  // On mount, check if the user is now verified
   useEffect(() => {
-    const checkVerification = async () => {
+    const checkAndMove = async () => {
       try {
+        // Get current user
         const { data: { user } } = await supabase.auth.getUser();
-        if (user?.email_confirmed_at) {
-          setStatus("success");
-          toast.success("Email verified successfully!");
-        } else if (user?.email) {
-          // User exists but not verified – store email for resend
-          setEmail(user.email);
-          setStatus("error");
-        } else {
-          // No user – maybe they aren't logged in; try to get email from sessionStorage
+        if (!user) {
+          // No user – try to get email from sessionStorage
           const storedEmail = sessionStorage.getItem("pendingVerificationEmail");
           if (storedEmail) setEmail(storedEmail);
+          setStatus("error");
+          return;
+        }
+
+        if (user.email_confirmed_at) {
+          // ✅ User is verified – call edge function to move to members (only once)
+          if (!movedRef.current) {
+            movedRef.current = true;
+            try {
+              const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/move-user`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: user.id, email: user.email }),
+              });
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.error || "Move failed");
+              toast.success("Account verified and ready!");
+            } catch (moveErr: any) {
+              console.error("Edge function error:", moveErr);
+              toast.error("Verification succeeded, but account update failed. You can still log in.");
+              // Still proceed to success state – the login-time move will handle it
+            }
+          }
+          setStatus("success");
+          toast.success("Email verified successfully!");
+        } else {
+          // Not verified – store email for resend
+          setEmail(user.email);
           setStatus("error");
         }
       } catch (err) {
@@ -35,10 +56,10 @@ export default function AokPage() {
         setStatus("error");
       }
     };
-    checkVerification();
+    checkAndMove();
   }, []);
 
-  // Auto‑redirect after success
+  // Auto-redirect after success
   useEffect(() => {
     if (status === "success" && countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
