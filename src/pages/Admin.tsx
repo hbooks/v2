@@ -1,6 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import {
@@ -74,8 +72,11 @@ async function uploadImages(files: FileList, productName: string): Promise<strin
 
 // ---------- Main Admin Component ----------
 export default function AdminPage() {
-  const { user, isLoading: authLoading, logout } = useAuth();
-  const navigate = useNavigate();
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState<"overview" | "products" | "updates" | "messages">("overview");
   const [products, setProducts] = useState<Product[]>([]);
@@ -108,18 +109,46 @@ export default function AdminPage() {
   });
   const [updateForm, setUpdateForm] = useState({ title: "", content: "" });
 
-  // Redirect to login if not admin
-  useEffect(() => {
-    if (!authLoading) {
-      if (!user || user.email !== "admin@hpbooks.uk") {
-        navigate("/login");
-      } else {
-        fetchAllData();
-      }
+  // Handle admin login using Supabase Auth
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+    if (!loginEmail || !loginPassword) {
+      setLoginError("Please enter both email and password");
+      return;
     }
-  }, [authLoading, user, navigate]);
+    if (loginEmail !== "admin@hpbooks.uk") {
+      setLoginError("Only admin@hpbooks.uk can access this panel");
+      return;
+    }
+    setLoginLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: loginPassword,
+      });
+      if (error) throw error;
+      setIsAdminLoggedIn(true);
+      toast.success("Admin access granted");
+      fetchAllData();
+    } catch (err: any) {
+      setLoginError(err.message || "Invalid credentials");
+      toast.error("Login failed");
+    } finally {
+      setLoginLoading(false);
+    }
+  };
 
-  // Fetch all data
+  // Handle logout – sign out from Supabase and reset state
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAdminLoggedIn(false);
+    setLoginEmail("");
+    setLoginPassword("");
+    toast.info("Logged out of admin panel");
+  };
+
+  // Fetch all data (only after successful login)
   const fetchAllData = async () => {
     setLoadingData(true);
     try {
@@ -318,13 +347,52 @@ export default function AdminPage() {
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    navigate("/login");
-  };
+  // ---------- Render login form if not authenticated ----------
+  if (!isAdminLoggedIn) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-lg">
+          <h1 className="mb-2 text-3xl font-bold text-foreground">Admin Login</h1>
+          <p className="mb-6 text-sm text-muted-foreground">Enter your admin credentials to access the panel</p>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Email</label>
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm"
+                placeholder="admin@hpbooks.uk"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Password</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+            {loginError && <p className="text-sm text-destructive">{loginError}</p>}
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {loginLoading ? "Logging in..." : "Log In"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
-  // Show loading while auth is initializing
-  if (authLoading || loadingData) {
+  // ---------- Loading state for admin panel data ----------
+  if (loadingData) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
@@ -334,9 +402,6 @@ export default function AdminPage() {
       </div>
     );
   }
-
-  // If not admin, return nothing (redirect already happened)
-  if (!user || user.email !== "admin@hpbooks.uk") return null;
 
   // ---------- Admin Panel UI ----------
   const tabs = [
