@@ -33,29 +33,29 @@ export default function CartPage() {
 
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          {items.map(({ product, quantity }) => (
-            <div key={product.id} className="flex gap-4 rounded-lg border border-border bg-card p-4">
+          {items.map((item) => (
+            <div key={item.id} className="flex gap-4 rounded-lg border border-border bg-card p-4">
               <img
-                src={product.cover_image_url}
-                alt={product.name}
+                src={item.cover_image_url}
+                alt={item.name}
                 className="h-24 w-16 rounded object-cover"
                 loading="lazy"
               />
               <div className="flex flex-1 flex-col justify-between">
                 <div>
-                  <h3 className="font-heading text-lg font-semibold text-foreground">{product.name}</h3>
-                  <p className="text-sm text-muted-foreground">${product.price.toFixed(2)}</p>
+                  <h3 className="font-heading text-lg font-semibold text-foreground">{item.name}</h3>
+                  <p className="text-sm text-muted-foreground">${item.price.toFixed(2)}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => updateQuantity(product.id, quantity - 1)}
+                    onClick={() => updateQuantity(item.id, item.quantity - 1)}
                     className="rounded border border-border p-1 text-muted-foreground hover:text-foreground"
                   >
                     <Minus className="h-3 w-3" />
                   </button>
-                  <span className="text-sm font-medium text-foreground">{quantity}</span>
+                  <span className="text-sm font-medium text-foreground">{item.quantity}</span>
                   <button
-                    onClick={() => updateQuantity(product.id, quantity + 1)}
+                    onClick={() => updateQuantity(item.id, item.quantity + 1)}
                     className="rounded border border-border p-1 text-muted-foreground hover:text-foreground"
                   >
                     <Plus className="h-3 w-3" />
@@ -63,9 +63,9 @@ export default function CartPage() {
                 </div>
               </div>
               <div className="flex flex-col items-end justify-between">
-                <span className="font-bold text-primary">${(product.price * quantity).toFixed(2)}</span>
+                <span className="font-bold text-primary">${(item.price * item.quantity).toFixed(2)}</span>
                 <button
-                  onClick={() => removeFromCart(product.id)}
+                  onClick={() => removeFromCart(item.id)}
                   className="text-muted-foreground hover:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
