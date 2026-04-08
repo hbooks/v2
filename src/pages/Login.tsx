@@ -120,7 +120,7 @@ export default function LoginPage() {
           </button>
           {captchaLoading && !turnstileToken && (
             <p className="text-xs text-center text-muted-foreground mt-2">
-              Confirming you are not a robot, please wait...
+              Confirming you're not a robot, please wait...
             </p>
           )}
         </form>

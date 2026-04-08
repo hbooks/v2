@@ -1,12 +1,18 @@
+// src/pages/Contact.tsx
 import { useState } from "react";
-import { Send, Mail } from "lucide-react";
+import { Send, Mail, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import TurnstileWidget from "@/components/TurnstileWidget";
 
 export default function ContactPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [captchaLoading, setCaptchaLoading] = useState(true);
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -14,14 +20,34 @@ export default function ContactPage() {
       toast.error("Please fill in all fields");
       return;
     }
+    if (!turnstileToken) {
+      toast.error("Security check still running, please wait...");
+      return;
+    }
     setLoading(true);
-    // TODO: Insert into Supabase contact_messages table
-    await new Promise((r) => setTimeout(r, 1000));
-    toast.success("Message sent! We'll get back to you soon.");
-    setName("");
-    setEmail("");
-    setMessage("");
-    setLoading(false);
+    try {
+      const { error } = await supabase.from("contact_messages").insert([
+        {
+          name: name.trim(),
+          email: email.trim(),
+          message: message.trim(),
+        },
+      ]);
+      if (error) throw error;
+      toast.success("Message sent! We'll get back to you soon.");
+      setName("");
+      setEmail("");
+      setMessage("");
+      // Reset captcha after successful send
+      setTurnstileToken(null);
+      setCaptchaLoading(true);
+      setTurnstileReset((prev) => prev + 1);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to send message. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,6 +75,7 @@ export default function ContactPage() {
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="Your name"
+              required
             />
           </div>
           <div>
@@ -59,6 +86,7 @@ export default function ContactPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="you@example.com"
+              required
             />
           </div>
           <div>
@@ -69,22 +97,43 @@ export default function ContactPage() {
               rows={5}
               className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring"
               placeholder="Your message..."
+              required
             />
           </div>
 
-          {/* Turnstile placeholder */}
-          <div className="rounded-md border border-dashed border-border bg-secondary/50 px-3 py-4 text-center text-xs text-muted-foreground">
-            🔒 Cloudflare Turnstile captcha will appear here
-          </div>
+          <TurnstileWidget
+            key={turnstileReset}
+            onSuccess={(token) => {
+              setTurnstileToken(token);
+              setCaptchaLoading(false);
+            }}
+            onError={() => {
+              setTurnstileToken(null);
+              setCaptchaLoading(true);
+            }}
+            onExpired={() => {
+              setTurnstileToken(null);
+              setCaptchaLoading(true);
+            }}
+          />
 
           <button
             type="submit"
-            disabled={loading}
-            className="flex items-center gap-2 rounded-md bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            disabled={loading || !turnstileToken}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            <Send className="h-4 w-4" />
-            {loading ? "Sending..." : "Send Message"}
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {loading ? "Sending..." : captchaLoading ? "Security check running..." : "Send Message"}
           </button>
+          {captchaLoading && !turnstileToken && (
+            <p className="text-xs text-center text-muted-foreground">
+              Confirming you're not a robot, please wait...
+            </p>
+          )}
         </form>
       </div>
     </div>
