@@ -177,56 +177,64 @@ export default function AdminPage() {
   };
 
   // ---------- Product CRUD ----------
-  const handleProductSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!productForm.name || !productForm.price) {
-      toast.error("Name and price are required");
-      return;
-    }
+const handleProductSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!productForm.name || !productForm.price) {
+    toast.error("Name and price are required");
+    return;
+  }
 
-    let imageUrls = [...productForm.existingImages];
-    if (productForm.newImages.length > 0) {
-      const newUrls = await uploadImages(productForm.newImages as unknown as FileList, productForm.name);
-      imageUrls = [...imageUrls, ...newUrls];
-    }
+  let imageUrls = [...productForm.existingImages];
+  if (productForm.newImages.length > 0) {
+    const newUrls = await uploadImages(productForm.newImages as unknown as FileList, productForm.name);
+    imageUrls = [...imageUrls, ...newUrls];
+  }
 
-    let filePath = editingProduct?.file_url || "";
-    if (productForm.product_file) {
-      const ext = productForm.product_file.name.split(".").pop();
-      const fileName = `${Date.now()}_${productForm.name.replace(/\s/g, "_")}.${ext}`;
-      const { data, error } = await supabase.storage.from("product-files").upload(fileName, productForm.product_file, { upsert: true });
-      if (!error && data) filePath = data.path;
-      else toast.error("Failed to upload product file");
-    }
+  let filePath = editingProduct?.file_url || "";
+  if (productForm.product_file) {
+    const ext = productForm.product_file.name.split(".").pop();
+    const fileName = `${Date.now()}_${productForm.name.replace(/\s/g, "_")}.${ext}`;
+    const { data, error } = await supabase.storage.from("product-files").upload(fileName, productForm.product_file, { upsert: true });
+    if (!error && data) filePath = data.path;
+    else toast.error("Failed to upload product file");
+  }
 
-    const productData = {
-      name: productForm.name,
-      description: productForm.description || null,
-      price: parseFloat(productForm.price),
-      type: productForm.type,
-      stock_status: productForm.stock_status,
-      images: imageUrls,
-      file_url: filePath,
-    };
+  // ✅ Validate stock_status – must be exactly 'in_stock' or 'out_of_stock'
+  let stockStatus = productForm.stock_status;
+  if (stockStatus !== 'in_stock' && stockStatus !== 'out_of_stock') {
+    console.warn(`Invalid stock_status: "${stockStatus}", defaulting to "in_stock"`);
+    stockStatus = 'in_stock';
+  }
 
-    let error;
-    if (editingProduct) {
-      const { error: updateErr } = await supabase.from("products").update(productData).eq("id", editingProduct.id);
-      error = updateErr;
-      if (!error) toast.success("Product updated");
-    } else {
-      const { error: insertErr } = await supabase.from("products").insert([productData]);
-      error = insertErr;
-      if (!error) toast.success("Product added");
-    }
-    if (error) {
-      toast.error(error.message);
-    } else {
-      fetchAllData();
-      setShowProductModal(false);
-      resetProductForm();
-    }
+  const productData = {
+    name: productForm.name,
+    description: productForm.description || null,
+    price: parseFloat(productForm.price),
+    type: productForm.type,
+    stock_status: stockStatus,
+    images: imageUrls,
+    file_url: filePath,
   };
+
+  let error;
+  if (editingProduct) {
+    const { error: updateErr } = await supabase.from("products").update(productData).eq("id", editingProduct.id);
+    error = updateErr;
+    if (!error) toast.success("Product updated");
+  } else {
+    const { error: insertErr } = await supabase.from("products").insert([productData]);
+    error = insertErr;
+    if (!error) toast.success("Product added");
+  }
+  if (error) {
+    console.error("Product save error:", error);
+    toast.error(error.message);
+  } else {
+    fetchAllData();
+    setShowProductModal(false);
+    resetProductForm();
+  }
+};
 
   const deleteProduct = async (id: string) => {
     if (!confirm("Delete this product permanently?")) return;
