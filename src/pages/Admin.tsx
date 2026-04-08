@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import {
@@ -73,11 +74,8 @@ async function uploadImages(files: FileList, productName: string): Promise<strin
 
 // ---------- Main Admin Component ----------
 export default function AdminPage() {
+  const { user, isLoading: authLoading, logout } = useAuth();
   const navigate = useNavigate();
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginError, setLoginError] = useState("");
 
   const [activeTab, setActiveTab] = useState<"overview" | "products" | "updates" | "messages">("overview");
   const [products, setProducts] = useState<Product[]>([]);
@@ -110,33 +108,18 @@ export default function AdminPage() {
   });
   const [updateForm, setUpdateForm] = useState({ title: "", content: "" });
 
-  // Admin credentials from .env (no fallback)
-  const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME;
-  const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD;
-
-  // Handle login
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginError("");
-    if (loginUsername === ADMIN_USERNAME && loginPassword === ADMIN_PASSWORD) {
-      setIsAdminLoggedIn(true);
-      toast.success("Admin access granted");
-      fetchAllData();
-    } else {
-      setLoginError("Invalid username or password");
+  // Redirect to login if not admin
+  useEffect(() => {
+    if (!authLoading) {
+      if (!user || user.email !== "admin@hpbooks.uk") {
+        navigate("/login");
+      } else {
+        fetchAllData();
+      }
     }
-  };
+  }, [authLoading, user, navigate]);
 
-  // Handle logout – reset state and redirect to home
-  const handleLogout = () => {
-    setIsAdminLoggedIn(false);
-    setLoginUsername("");
-    setLoginPassword("");
-    toast.info("Logged out of admin panel");
-    navigate("/");
-  };
-
-  // Fetch all data (only after successful login)
+  // Fetch all data
   const fetchAllData = async () => {
     setLoadingData(true);
     try {
@@ -335,51 +318,13 @@ export default function AdminPage() {
     }
   };
 
-  // ---------- Render login form if not authenticated ----------
-  if (!isAdminLoggedIn) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-lg">
-          <h1 className="mb-2 text-3xl font-bold text-foreground">Admin Login</h1>
-          <p className="mb-6 text-sm text-muted-foreground">Enter your credentials to access the admin panel</p>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Username</label>
-              <input
-                type="text"
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm"
-                placeholder="Username"
-                required
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Password</label>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2.5 text-sm"
-                placeholder="Password"
-                required
-              />
-            </div>
-            {loginError && <p className="text-sm text-destructive">{loginError}</p>}
-            <button
-              type="submit"
-              className="w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              Log In
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
 
-  // ---------- Loading state for admin panel data ----------
-  if (loadingData) {
+  // Show loading while auth is initializing
+  if (authLoading || loadingData) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
@@ -389,6 +334,9 @@ export default function AdminPage() {
       </div>
     );
   }
+
+  // If not admin, return nothing (redirect already happened)
+  if (!user || user.email !== "admin@hpbooks.uk") return null;
 
   // ---------- Admin Panel UI ----------
   const tabs = [

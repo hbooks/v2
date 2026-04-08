@@ -1,4 +1,3 @@
-// src/pages/UnverifiedShopPage.tsx
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Mail } from "lucide-react";
