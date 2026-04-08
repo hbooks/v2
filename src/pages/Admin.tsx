@@ -176,7 +176,20 @@ export default function AdminPage() {
     }
   };
 
-  // ---------- Product CRUD ----------
+// ---------- Product CRUD ----------
+const resetProductForm = () => {
+  setProductForm({
+    name: "",
+    description: "",
+    price: "",
+    type: "book",
+    stock_status: "in_stock",
+    existingImages: [],
+    newImages: [],
+    product_file: null,
+  });
+};
+
 const handleProductSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
   if (!productForm.name || !productForm.price) {
@@ -199,11 +212,13 @@ const handleProductSubmit = async (e: React.FormEvent) => {
     else toast.error("Failed to upload product file");
   }
 
-  // ✅ Validate stock_status – must be exactly 'in_stock' or 'out_of_stock'
+  // ✅ Validate stock_status
   let stockStatus = productForm.stock_status;
+  console.log("Raw stock_status from form:", stockStatus);
   if (stockStatus !== 'in_stock' && stockStatus !== 'out_of_stock') {
     console.warn(`Invalid stock_status: "${stockStatus}", defaulting to "in_stock"`);
     stockStatus = 'in_stock';
+    setProductForm(prev => ({ ...prev, stock_status: 'in_stock' }));
   }
 
   const productData = {
@@ -215,6 +230,8 @@ const handleProductSubmit = async (e: React.FormEvent) => {
     images: imageUrls,
     file_url: filePath,
   };
+
+  console.log("Final productData being sent:", productData);
 
   let error;
   if (editingProduct) {
@@ -236,65 +253,52 @@ const handleProductSubmit = async (e: React.FormEvent) => {
   }
 };
 
-  const deleteProduct = async (id: string) => {
-    if (!confirm("Delete this product permanently?")) return;
-    const { error } = await supabase.from("products").delete().eq("id", id);
-    if (error) toast.error(error.message);
-    else {
-      toast.success("Product deleted");
-      fetchAllData();
-    }
-  };
+const deleteProduct = async (id: string) => {
+  if (!confirm("Delete this product permanently?")) return;
+  const { error } = await supabase.from("products").delete().eq("id", id);
+  if (error) toast.error(error.message);
+  else {
+    toast.success("Product deleted");
+    fetchAllData();
+  }
+};
 
-  const toggleStock = async (id: string, currentStatus: string) => {
-    const newStatus = currentStatus === "in_stock" ? "out_of_stock" : "in_stock";
-    const { error } = await supabase.from("products").update({ stock_status: newStatus }).eq("id", id);
-    if (error) toast.error(error.message);
-    else {
-      toast.success(`Product ${newStatus === "in_stock" ? "in stock" : "out of stock"}`);
-      fetchAllData();
-    }
-  };
+const toggleStock = async (id: string, currentStatus: string) => {
+  const newStatus = currentStatus === "in_stock" ? "out_of_stock" : "in_stock";
+  const { error } = await supabase.from("products").update({ stock_status: newStatus }).eq("id", id);
+  if (error) toast.error(error.message);
+  else {
+    toast.success(`Product ${newStatus === "in_stock" ? "in stock" : "out of stock"}`);
+    fetchAllData();
+  }
+};
 
-  const openProductModal = (product?: Product) => {
-    if (product) {
-      setEditingProduct(product);
-      setProductForm({
-        name: product.name,
-        description: product.description || "",
-        price: product.price.toString(),
-        type: product.type,
-        stock_status: product.stock_status,
-        existingImages: product.images || [],
-        newImages: [],
-        product_file: null,
-      });
-    } else {
-      setEditingProduct(null);
-      resetProductForm();
-    }
-    setShowProductModal(true);
-  };
-
-  const resetProductForm = () => {
+const openProductModal = (product?: Product) => {
+  if (product) {
+    setEditingProduct(product);
     setProductForm({
-      name: "",
-      description: "",
-      price: "",
-      type: "book",
-      stock_status: "in_stock",
-      existingImages: [],
+      name: product.name,
+      description: product.description || "",
+      price: product.price.toString(),
+      type: product.type,
+      stock_status: product.stock_status || "in_stock",
+      existingImages: product.images || [],
       newImages: [],
       product_file: null,
     });
-  };
+  } else {
+    setEditingProduct(null);
+    resetProductForm();
+  }
+  setShowProductModal(true);
+};
 
-  const removeExistingImage = (urlToRemove: string) => {
-    setProductForm({
-      ...productForm,
-      existingImages: productForm.existingImages.filter(url => url !== urlToRemove),
-    });
-  };
+const removeExistingImage = (urlToRemove: string) => {
+  setProductForm({
+    ...productForm,
+    existingImages: productForm.existingImages.filter(url => url !== urlToRemove),
+  });
+};
 
   // ---------- Update CRUD ----------
   const handleUpdateSubmit = async (e: React.FormEvent) => {
