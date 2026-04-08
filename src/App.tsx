@@ -50,6 +50,10 @@ function AppContent() {
   if (isAdmin) {
     return <Admin />;
   }
+  // unverified page has no headers to prevent bypassing verification by navigating to other pages
+if (location.pathname === "/unverified-shop") {
+  return <UnverifiedShop />;
+}
 
   // Normal layout for all other pages
   return (
