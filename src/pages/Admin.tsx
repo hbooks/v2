@@ -208,8 +208,13 @@ const handleProductSubmit = async (e: React.FormEvent) => {
     const ext = productForm.product_file.name.split(".").pop();
     const fileName = `${Date.now()}_${productForm.name.replace(/\s/g, "_")}.${ext}`;
     const { data, error } = await supabase.storage.from("product-files").upload(fileName, productForm.product_file, { upsert: true });
-    if (!error && data) filePath = data.path;
-    else toast.error("Failed to upload product file");
+      if (!error && data) {
+    filePath = data.path;
+    console.log("✅ File uploaded, path saved to DB:", filePath); // ADD THIS
+  } else {
+    console.error("Upload error:", error);
+    toast.error("Failed to upload product file");
+  }
   }
 
   // ✅ Validate stock_status
