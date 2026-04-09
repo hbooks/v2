@@ -1,10 +1,14 @@
+import { useState } from "react";
 import { useCart } from "@/lib/cart-context";
+import { useAuth } from "@/lib/auth-context";
 import { Trash2, Plus, Minus, ShoppingBag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 export default function CartPage() {
   const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
 
   if (items.length === 0) {
     return (
@@ -22,9 +26,26 @@ export default function CartPage() {
     );
   }
 
-  const handleCheckout = () => {
-    // TODO: Create IntaSend checkout session
-    toast.info("IntaSend checkout will be integrated here");
+  const handleCheckout = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: items.map(item => ({ id: item.id, name: item.name, price: item.price, quantity: item.quantity })),
+          email: user?.email || "guest@example.com",
+          userId: user?.id || null,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      window.location.href = data.checkoutUrl;
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -96,9 +117,10 @@ export default function CartPage() {
           </div>
           <button
             onClick={handleCheckout}
-            className="mt-6 w-full rounded-md bg-primary py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            disabled={loading}
+            className="mt-6 w-full rounded-md bg-primary py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            Checkout with IntaSend
+            {loading ? "Processing..." : "Checkout with IntaSend"}
           </button>
           <button
             onClick={() => clearCart()}

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, ReactNode } from "react";
-import { Product } from "@/components/ProductCard"; // or from your types file
+import { Product } from "@/components/ProductCard"; 
 
 export type CartItem = {
   id: string;
