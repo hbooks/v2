@@ -152,59 +152,67 @@ export default function AdminPage() {
 const fetchAllData = async () => {
   setLoadingData(true);
   try {
-    // Products
+    // ── Content data ───────────────────────────────────────────────
     const { data: productsData } = await supabase
       .from("products")
       .select("*")
       .order("created_at", { ascending: false });
     setProducts(productsData || []);
 
-    // Updates
     const { data: updatesData } = await supabase
       .from("updates")
       .select("*")
       .order("created_at", { ascending: false });
     setUpdates(updatesData || []);
 
-    // Contact messages
     const { data: messagesData } = await supabase
       .from("contact_messages")
       .select("*")
       .order("created_at", { ascending: false });
     setMessages(messagesData || []);
 
+    // ── Stats ──────────────────────────────────────────────────────
+
     // Total products
     const { count: totalProducts } = await supabase
       .from("products")
       .select("*", { count: "exact", head: true });
-
-    // Total users: members + unverified_users
-    const { count: membersCount } = await supabase
-      .from("members")
-      .select("*", { count: "exact", head: true });
-    const { count: unverifiedCount } = await supabase
-      .from("unverified_users")
-      .select("*", { count: "exact", head: true });
-    const totalUsers = (membersCount || 0) + (unverifiedCount || 0);
-
-    // Active members: members with tag='member' AND (expiry_date is NULL OR expiry_date > now)
-    const { count: activeMembers } = await supabase
-      .from("members")
-      .select("*", { count: "exact", head: true })
-      .eq("tag", "member")
-      .or("expiry_date.is.null,expiry_date.gt.now()");
 
     // Total messages
     const { count: totalMessages } = await supabase
       .from("contact_messages")
       .select("*", { count: "exact", head: true });
 
+    // ✅ Total users = ALL users in auth.users regardless of tag.
+    // auth.users is not queryable directly from the client, so we
+    // call the SQL function created in create-user-count-function.sql
+    const { data: userCountData, error: userCountError } = await supabase
+      .rpc("get_total_user_count");
+
+    if (userCountError) {
+      console.error("get_total_user_count error:", userCountError.message);
+    }
+    const totalUsers: number = userCountData ?? 0;
+
+    // ✅ Active members = rows in members table with tag = 'member' ONLY.
+    // This means paid/active subscribers — excludes 'non-member',
+    // 'unverified', and any other tag values.
+    const { count: totalMembers, error: membersError } = await supabase
+      .from("members")
+      .select("*", { count: "exact", head: true })
+      .eq("tag", "member");
+
+    if (membersError) {
+      console.error("totalMembers count error:", membersError.message);
+    }
+
     setStats({
       totalProducts: totalProducts || 0,
-      totalUsers: totalUsers,
-      totalMembers: activeMembers || 0,
+      totalUsers,                        // all users in auth.users
+      totalMembers: totalMembers || 0,   // only tag = 'member'
       totalMessages: totalMessages || 0,
     });
+
   } catch (err) {
     console.error("Fetch error:", err);
     toast.error("Failed to load admin data");
