@@ -12,6 +12,7 @@ import {
   BarChart3,
   X,
   LogOut,
+  ShoppingBagIcon,
 } from "lucide-react";
 
 // ---------- Types ----------
@@ -47,6 +48,7 @@ type Stat = {
   totalUsers: number;
   totalMembers: number;
   totalMessages: number;
+  totalSales: number; 
 };
 
 // ---------- Helper: Upload multiple images ----------
@@ -88,6 +90,7 @@ export default function AdminPage() {
     totalUsers: 0,
     totalMembers: 0,
     totalMessages: 0,
+    totalSales: 0,
   });
 
   // Modal states
@@ -206,11 +209,23 @@ const fetchAllData = async () => {
       console.error("totalMembers count error:", membersError.message);
     }
 
+    // ✅ Total sales = completed orders only (status = 'complete').
+    // Pending or abandoned checkouts are not counted.
+    const { count: totalSales, error: salesError } = await supabase
+      .from("orders")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "complete");
+
+    if (salesError) {
+      console.error("totalSales count error:", salesError.message);
+    }
+
     setStats({
       totalProducts: totalProducts || 0,
       totalUsers,                        // all users in auth.users
       totalMembers: totalMembers || 0,   // only tag = 'member'
       totalMessages: totalMessages || 0,
+      totalSales: totalSales || 0,       // only status = 'complete'
     });
 
   } catch (err) {
@@ -515,6 +530,7 @@ const removeExistingImage = (urlToRemove: string) => {
               <StatCard label="Total Users" value={stats.totalUsers} icon={Users} />
               <StatCard label="Active Members" value={stats.totalMembers} icon={Users} />
               <StatCard label="Messages" value={stats.totalMessages} icon={MessageSquare} />
+              <StatCard label="Total Sales" value={stats.totalSales} icon={ShoppingBagIcon} />
             </div>
           </div>
         )}
@@ -775,6 +791,7 @@ const removeExistingImage = (urlToRemove: string) => {
     </div>
   );
 }
+
 
 // ---------- Helper Components ----------
 function StatCard({ label, value, icon: Icon }: { label: string; value: number; icon: React.ElementType }) {
