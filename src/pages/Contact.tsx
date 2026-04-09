@@ -14,42 +14,45 @@ export default function ContactPage() {
   const [captchaLoading, setCaptchaLoading] = useState(true);
   const [turnstileReset, setTurnstileReset] = useState(0);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !email.trim() || !message.trim()) {
-      toast.error("Please fill in all fields");
-      return;
-    }
-    if (!turnstileToken) {
-      toast.error("Security check still running, please wait...");
-      return;
-    }
-    setLoading(true);
-    try {
-      const { error } = await supabase.from("contact_messages").insert([
-        {
-          name: name.trim(),
-          email: email.trim(),
-          message: message.trim(),
-        },
-      ]);
-      if (error) throw error;
-      toast.success("Message sent! We'll get back to you soon.");
-      setName("");
-      setEmail("");
-      setMessage("");
-      // Reset captcha after successful send
-      setTurnstileToken(null);
-      setCaptchaLoading(true);
-      setTurnstileReset((prev) => prev + 1);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err.message || "Failed to send message. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!name.trim() || !email.trim() || !message.trim()) {
+    toast.error("Please fill in all fields");
+    return;
+  }
+  if (!turnstileToken) {
+    toast.error("Security check still running, please wait...");
+    return;
+  }
+  setLoading(true);
+  try {
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-contact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        email: email.trim(),
+        message: message.trim(),
+        turnstileToken,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    toast.success("Message sent! We'll get back to you soon.");
+    setName("");
+    setEmail("");
+    setMessage("");
+    // Reset captcha after successful send
+    setTurnstileToken(null);
+    setCaptchaLoading(true);
+    setTurnstileReset((prev) => prev + 1);
+  } catch (err: any) {
+    console.error(err);
+    toast.error(err.message || "Failed to send message. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+};
   return (
     <div className="container mx-auto px-4 py-12">
       <div className="mx-auto max-w-2xl">
