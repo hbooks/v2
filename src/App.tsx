@@ -32,7 +32,7 @@ const queryClient = new QueryClient();
 function AppContent() {
   const { loading } = useAuth();
   const location = useLocation();
-  const isAdmin = location.pathname === "/X4560adm";
+  const isAdmin = location.pathname === "/scrd1478";
 
   // Show a full‑screen loader while auth is initializing
   if (loading) {
