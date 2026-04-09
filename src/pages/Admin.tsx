@@ -148,33 +148,70 @@ export default function AdminPage() {
     toast.info("Logged out of admin panel");
   };
 
-  // Fetch all data (only after successful login)
-  const fetchAllData = async () => {
-    setLoadingData(true);
-    try {
-      const { data: productsData } = await supabase.from("products").select("*").order("created_at", { ascending: false });
-      setProducts(productsData || []);
-      const { data: updatesData } = await supabase.from("updates").select("*").order("created_at", { ascending: false });
-      setUpdates(updatesData || []);
-      const { data: messagesData } = await supabase.from("contact_messages").select("*").order("created_at", { ascending: false });
-      setMessages(messagesData || []);
-      const { count: totalProducts } = await supabase.from("products").select("*", { count: "exact", head: true });
-      const { count: totalUsers } = await supabase.from("members").select("*", { count: "exact", head: true });
-      const { count: totalMembers } = await supabase.from("members").select("*", { count: "exact", head: true }).eq("tag", "member");
-      const { count: totalMessages } = await supabase.from("contact_messages").select("*", { count: "exact", head: true });
-      setStats({
-        totalProducts: totalProducts || 0,
-        totalUsers: totalUsers || 0,
-        totalMembers: totalMembers || 0,
-        totalMessages: totalMessages || 0,
-      });
-    } catch (err) {
-      console.error("Fetch error:", err);
-      toast.error("Failed to load admin data");
-    } finally {
-      setLoadingData(false);
-    }
-  };
+// Fetch all data (only after successful login)
+const fetchAllData = async () => {
+  setLoadingData(true);
+  try {
+    // Products
+    const { data: productsData } = await supabase
+      .from("products")
+      .select("*")
+      .order("created_at", { ascending: false });
+    setProducts(productsData || []);
+
+    // Updates
+    const { data: updatesData } = await supabase
+      .from("updates")
+      .select("*")
+      .order("created_at", { ascending: false });
+    setUpdates(updatesData || []);
+
+    // Contact messages
+    const { data: messagesData } = await supabase
+      .from("contact_messages")
+      .select("*")
+      .order("created_at", { ascending: false });
+    setMessages(messagesData || []);
+
+    // Total products
+    const { count: totalProducts } = await supabase
+      .from("products")
+      .select("*", { count: "exact", head: true });
+
+    // Total users: members + unverified_users
+    const { count: membersCount } = await supabase
+      .from("members")
+      .select("*", { count: "exact", head: true });
+    const { count: unverifiedCount } = await supabase
+      .from("unverified_users")
+      .select("*", { count: "exact", head: true });
+    const totalUsers = (membersCount || 0) + (unverifiedCount || 0);
+
+    // Active members: members with tag='member' AND (expiry_date is NULL OR expiry_date > now)
+    const { count: activeMembers } = await supabase
+      .from("members")
+      .select("*", { count: "exact", head: true })
+      .eq("tag", "member")
+      .or("expiry_date.is.null,expiry_date.gt.now()");
+
+    // Total messages
+    const { count: totalMessages } = await supabase
+      .from("contact_messages")
+      .select("*", { count: "exact", head: true });
+
+    setStats({
+      totalProducts: totalProducts || 0,
+      totalUsers: totalUsers,
+      totalMembers: activeMembers || 0,
+      totalMessages: totalMessages || 0,
+    });
+  } catch (err) {
+    console.error("Fetch error:", err);
+    toast.error("Failed to load admin data");
+  } finally {
+    setLoadingData(false);
+  }
+};
 
 // ---------- Product CRUD ----------
 const resetProductForm = () => {
