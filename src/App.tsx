@@ -20,6 +20,7 @@ import MemberShop from "./pages/MemberShop";
 import Cart from "./pages/Cart";
 import Membership from "./pages/Membership";
 import Updates from "./pages/Updates";
+import PaymentSuccess from "./pages/PaymentSuccess";
 import Contact from "./pages/Contact";
 import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
@@ -73,6 +74,7 @@ if (location.pathname === "/unverified-shop") {
           <Route path="/cart" element={<Cart />} />
           <Route path="/membership" element={<Membership />} />
           <Route path="/updates" element={<Updates />} />
+          <Route path="/payment-success" element={<PaymentSuccess />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
