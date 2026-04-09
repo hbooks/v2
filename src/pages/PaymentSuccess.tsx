@@ -10,6 +10,8 @@ type DownloadLink = {
   download_url: string;
 };
 
+const MAX_ATTEMPTS = 12; // 12 × 5s = 60 seconds
+
 export default function PaymentSuccess() {
   const [searchParams] = useSearchParams();
   const apiRef = searchParams.get("api_ref");
@@ -29,7 +31,6 @@ export default function PaymentSuccess() {
 
     let interval: ReturnType<typeof setInterval>;
     let attempts = 0;
-    const maxAttempts = 12;
 
     const fetchOrder = async () => {
       attempts++;
@@ -58,7 +59,7 @@ export default function PaymentSuccess() {
           return;
         }
 
-        if (attempts >= maxAttempts) {
+        if (attempts >= MAX_ATTEMPTS) {
           setError(
             "Could not retrieve your order after multiple attempts. Please contact support@hpbooks.uk with reference: " +
               apiRef
@@ -78,7 +79,7 @@ export default function PaymentSuccess() {
         setLoading(false);
         clearInterval(interval);
         toast.success("Your downloads are ready!");
-      } else if (attempts >= maxAttempts) {
+      } else if (attempts >= MAX_ATTEMPTS) {
         setError(
           "Your payment was received but your order is not ready yet. Downloads are usually available within 2 minutes. Please refresh this page or contact support@hpbooks.uk with reference: " +
             apiRef
@@ -111,7 +112,7 @@ export default function PaymentSuccess() {
         </p>
         {retryCount > 0 && (
           <p className="mt-2 text-sm text-muted-foreground">
-            Checking… ({retryCount} / {maxAttempts})
+            Checking… ({retryCount} / {MAX_ATTEMPTS})
           </p>
         )}
         {apiRef && (
