@@ -39,53 +39,52 @@ export default function MembershipPage() {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   const handleSubscribe = async (plan: { name: string; planId: string }) => {
-    // Redirect guests to login
-    if (isGuest || !user) {
-      setShowGuestModal(true);
-      return;
-    }
+  if (isGuest || !user) {
+    setShowGuestModal(true);
+    return;
+  }
 
-    setLoadingPlan(plan.name);
+  setLoadingPlan(plan.name);
 
-    try {
-      // Fetch user profile for username / email
-      const { data: profile } = await supabase
-        .from("members")
-        .select("email, username")
-        .eq("id", user.id)
-        .maybeSingle();
+  try {
+    const { data: profile } = await supabase
+      .from("members")
+      .select("email, username")
+      .eq("id", user.id)
+      .maybeSingle();
 
-      const email    = profile?.email    || user.email    || "";
-      const username = profile?.username || user.email?.split("@")[0] || "";
+    const email = profile?.email || user.email || "";
+    const username = profile?.username || user.email?.split("@")[0] || "";
 
-      // Call the create-membership-checkout edge function
-      const { data, error } = await supabase.functions.invoke(
-        "create-membership-checkout",
-        {
-          body: {
-            planId:   plan.planId,
-            planName: plan.name,
-            email,
-            userId:   user.id,
-            username,
-          },
-        }
-      );
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-membership-checkout`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          planId: plan.planId,
+          planName: plan.name,
+          email,
+          userId: user.id,
+          username,
+        }),
+      }
+    );
 
-      if (error) throw new Error(error.message);
-      if (!data?.checkoutUrl) throw new Error("No checkout URL returned");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Checkout creation failed");
+    if (!data?.checkoutUrl) throw new Error("No checkout URL returned");
 
-      // Redirect to IntaSend subscription setup page
-      window.location.href = data.checkoutUrl;
-
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Something went wrong";
-      console.error("Subscription error:", message);
-      toast.error(message);
-      setLoadingPlan(null);
-    }
-  };
-
+    window.location.href = data.checkoutUrl;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Something went wrong";
+    console.error("Subscription error:", message);
+    toast.error(message);
+    setLoadingPlan(null);
+  }
+};
   return (
     <div className="container mx-auto px-4 py-12">
       <div className="mb-12 text-center">
