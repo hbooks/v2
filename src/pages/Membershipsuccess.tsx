@@ -52,9 +52,11 @@ function Confetti() {
 }
 
 export default function MembershipSuccess() {
-  const [searchParams]   = useSearchParams();
-  const reference        = searchParams.get("reference");
-  const planFromUrl      = searchParams.get("plan") ?? "monthly";
+  const [searchParams] = useSearchParams();
+  // IntaSend strips query params from redirect_url, so we cannot rely on
+  // URL params. planFromUrl is kept as a display hint only — it may be
+  // absent, so default to "monthly".
+  const planFromUrl = searchParams.get("plan") ?? "monthly";
 
   const [member,   setMember]   = useState<MemberStatus | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -64,55 +66,47 @@ export default function MembershipSuccess() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (!reference) {
-      setError("No subscription reference found. If you completed payment, your account will be updated within a few minutes.");
-      setLoading(false);
-      return;
-    }
-
+    // Poll the members table for the logged-in user until tag = 'member'.
+    // We don't rely on URL params because IntaSend strips query strings
+    // from redirect_url — instead we just check the current user's row.
     const poll = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        setError("You need to be signed in to view your membership status.");
+        setLoading(false);
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        return;
+      }
+
+      const { data: memberRow, error: fetchErr } = await supabase
+        .from("members")
+        .select("tag, expiry_date, email")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (fetchErr) {
+        console.error("Poll error:", fetchErr.message);
+      }
+
+      if (memberRow?.tag === "member") {
+        setMember(memberRow);
+        setLoading(false);
+        setShowConfetti(true);
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        return;
+      }
+
       setAttempts((a) => {
         const next = a + 1;
-
-        supabase
-          .from("members")
-          .select("tag, expiry_date, email")
-          .eq("pending_subscription_ref", reference)   // still pending
-          .maybeSingle()
-          .then(async ({ data: pendingRow }) => {
-            // If pending_subscription_ref is cleared the webhook ran
-            // and the member is now active — fetch by checking tag
-            if (!pendingRow) {
-              // Reference was cleared — try fetching by current session user
-              const { data: { user } } = await supabase.auth.getUser();
-              if (user) {
-                const { data: activeMember } = await supabase
-                  .from("members")
-                  .select("tag, expiry_date, email")
-                  .eq("id", user.id)
-                  .eq("tag", "member")
-                  .maybeSingle();
-
-                if (activeMember) {
-                  setMember(activeMember);
-                  setLoading(false);
-                  setShowConfetti(true);
-                  if (intervalRef.current) clearInterval(intervalRef.current);
-                  return;
-                }
-              }
-            }
-
-            if (next >= MAX_ATTEMPTS) {
-              setError(
-                "Your payment was received! Your membership is being activated and should be ready within 2 minutes. " +
-                "Please refresh the page or check your profile."
-              );
-              setLoading(false);
-              if (intervalRef.current) clearInterval(intervalRef.current);
-            }
-          });
-
+        if (next >= MAX_ATTEMPTS) {
+          setError(
+            "Your payment was received! Your membership is being activated and should be ready within 2 minutes. " +
+            "Please refresh the page or check your profile."
+          );
+          setLoading(false);
+          if (intervalRef.current) clearInterval(intervalRef.current);
+        }
         return next;
       });
     };
@@ -122,7 +116,7 @@ export default function MembershipSuccess() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [reference]);
+  }, []);
 
   // Auto-redirect to shop after 8 seconds on success
   useEffect(() => {
