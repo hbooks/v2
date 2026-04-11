@@ -10,7 +10,7 @@ const guestLinks = [
   { to: "/my-books", label: "My Books" },
   { to: "/exclusive", label: "Exclusive Scenes" },
   { to: "/cart", label: "Cart" },
-  { to: "/coming-soon", label: "Membership" },
+  { to: "/comingsoon", label: "Membership" },
   { to: "/updates", label: "Updates" },
   { to: "/contact", label: "Contact" },
 ];
