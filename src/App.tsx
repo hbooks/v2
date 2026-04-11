@@ -76,7 +76,7 @@ if (location.pathname === "/unverified-shop") {
           <Route path="/member-shop" element={<MemberShop />} />
           <Route path="/cart" element={<Cart />} />
           <Route path="/profile" element={<Profile />} />
-          <Route path="/coming-soon" element={<ComingSoon />} />
+          <Route path="/comingsoon" element={<ComingSoon />} />
           <Route path="/membership" element={<Membership />} />
           <Route path="/updates" element={<Updates />} />
           <Route path="/payment-success" element={<PaymentSuccess />} />
