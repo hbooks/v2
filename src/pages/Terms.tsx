@@ -200,7 +200,7 @@ export default function TermsPage() {
             Terms of Service
           </h1>
           <p className="mt-4 max-w-2xl text-lg text-muted-foreground leading-relaxed">
-            These terms govern your use of Hbooks Stores. Please read them carefully —
+            These terms govern your use of Hooman Stores. Please read them carefully —
             they explain your rights, our obligations, and the rules that keep our community fair.
           </p>
           <div className="mt-6 flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
