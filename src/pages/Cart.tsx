@@ -5,6 +5,15 @@ import { Trash2, Plus, Minus, ShoppingBag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
+const INTASEND_MIN = 9.00; // IntaSend minimum transaction amount for USD
+
+// Returns the processing fee needed to meet IntaSend's $9 minimum.
+// If the subtotal already meets or exceeds $9, no fee is added.
+function getProcessingFee(subtotal: number): number {
+  if (subtotal >= INTASEND_MIN) return 0;
+  return parseFloat((INTASEND_MIN - subtotal).toFixed(2));
+}
+
 export default function CartPage() {
   const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
   const { user } = useAuth();
@@ -26,6 +35,9 @@ export default function CartPage() {
     );
   }
 
+  const processingFee = getProcessingFee(totalPrice);
+  const orderTotal = parseFloat((totalPrice + processingFee).toFixed(2));
+
   const handleCheckout = async () => {
     setLoading(true);
     try {
@@ -33,7 +45,10 @@ export default function CartPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // Pass the actual order total (including fee) so the edge function
+          // charges the correct amount that meets IntaSend's $9 minimum.
           items: items.map(item => ({ id: item.id, name: item.name, price: item.price, quantity: item.quantity })),
+          processingFee,
           email: user?.email || "guest@example.com",
           userId: user?.id || null,
         }),
@@ -105,14 +120,19 @@ export default function CartPage() {
               <span>${totalPrice.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-muted-foreground">
-              <span>Processing fee</span>
-              <span>$0.00</span>
+              <span>
+                Processing fee
+                {processingFee > 0 && (
+                  <span className="ml-1 text-xs opacity-70">(min. order adjustment)</span>
+                )}
+              </span>
+              <span>${processingFee.toFixed(2)}</span>
             </div>
           </div>
           <div className="mt-4 border-t border-border pt-4">
             <div className="flex justify-between text-lg font-bold text-foreground">
               <span>Total</span>
-              <span className="text-primary">${totalPrice.toFixed(2)}</span>
+              <span className="text-primary">${orderTotal.toFixed(2)}</span>
             </div>
           </div>
           <button
