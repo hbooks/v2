@@ -24,10 +24,18 @@ export default function Footer() {
             </div>
           </div>
           <div>
-            <h4 className="mb-3 font-heading text-sm font-semibold text-foreground">Support</h4>
+             <h4 className="mb-3 font-heading text-sm font-semibold text-foreground">Support</h4>
             <div className="flex flex-col gap-2">
               <Link to="/contact" className="text-sm text-muted-foreground hover:text-foreground">Contact</Link>
               <Link to="/updates" className="text-sm text-muted-foreground hover:text-foreground">Updates</Link>
+              <a
+                href="https://status.hpbooks.uk/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-muted-foreground hover:text-foreground"
+              >
+                System Status
+              </a>
             </div>
           </div>
           <div>
