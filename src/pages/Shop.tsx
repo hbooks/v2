@@ -280,7 +280,7 @@ export default function ShopPage() {
         <div className="container mx-auto px-4 py-20 relative">
           <SectionHeader
             icon={Sparkles}
-            label="Members Only"
+            label="Members Package"
             title="Exclusive Scenes"
             subtitle="Behind-the-scenes content, deleted chapters, and extras you won't find anywhere else."
           />
