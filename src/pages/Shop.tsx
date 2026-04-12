@@ -326,7 +326,7 @@ export default function ShopPage() {
               Get unlimited access to all books and exclusive content for one low monthly price.
             </p>
             <a
-              href="/membership"
+              href="/comingsoon" // change later to /membership
               className="mt-6 inline-flex items-center gap-2 rounded-md bg-primary px-7 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <Star className="h-4 w-4" />
