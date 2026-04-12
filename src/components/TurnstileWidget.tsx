@@ -1,107 +1,157 @@
-// src/components/TurnstileWidget.tsx
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 interface TurnstileWidgetProps {
   onSuccess: (token: string) => void;
   onError?: () => void;
   onExpired?: () => void;
-  reset?: number;
+  reset?: number; // increment this value to re-execute the challenge
 }
 
 declare global {
   interface Window {
-    turnstile: any;
+    turnstile: {
+      render: (container: HTMLElement | string, options: object) => string;
+      execute: (widgetId: string) => void;
+      reset: (widgetId: string) => void;
+      remove: (widgetId: string) => void;
+      ready: (callback: () => void) => void;
+    };
+    onTurnstileLoad?: () => void;
   }
 }
 
-export default function TurnstileWidget({ onSuccess, onError, onExpired, reset }: TurnstileWidgetProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY;
-  const widgetIdRef = useRef<string | null>(null);
-  const [scriptReady, setScriptReady] = useState(false);
+export default function TurnstileWidget({
+  onSuccess,
+  onError,
+  onExpired,
+  reset,
+}: TurnstileWidgetProps) {
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const widgetIdRef   = useRef<string | null>(null);
+  const siteKey       = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
-  // Load Turnstile script once
-  useEffect(() => {
-    if (!siteKey) return;
-    if (window.turnstile) {
-      setScriptReady(true);
-      return;
+  // Stable callback refs — prevents the render effect from firing on every
+  // parent re-render just because inline arrow functions changed identity
+  const onSuccessRef = useRef(onSuccess);
+  const onErrorRef   = useRef(onError);
+  const onExpiredRef = useRef(onExpired);
+  useEffect(() => { onSuccessRef.current = onSuccess; }, [onSuccess]);
+  useEffect(() => { onErrorRef.current   = onError;   }, [onError]);
+  useEffect(() => { onExpiredRef.current = onExpired; }, [onExpired]);
+
+  const renderWidget = useCallback(() => {
+    if (!containerRef.current || !window.turnstile) return;
+
+    // Clean up any existing widget first
+    if (widgetIdRef.current) {
+      try { window.turnstile.remove(widgetIdRef.current); } catch (_) {}
+      widgetIdRef.current = null;
     }
-    if (document.querySelector("#turnstile-script")) {
-      const checkInterval = setInterval(() => {
-        if (window.turnstile) {
-          clearInterval(checkInterval);
-          setScriptReady(true);
+
+    widgetIdRef.current = window.turnstile.render(containerRef.current, {
+      sitekey: siteKey,
+
+      // "managed" lets Cloudflare decide silently vs interactive.
+      // Paired with appearance "interaction-only" so the widget is only
+      // shown to the user if Cloudflare decides interaction is needed —
+      // fully invisible for clean users.
+      // Do NOT set execution: "execute" here — that defers the challenge
+      // until you manually call turnstile.execute(), which means it never
+      // runs automatically. Omitting it (default "render") starts the
+      // challenge immediately after render().
+      appearance: "interaction-only",
+      theme: "auto",
+
+      callback: (token: string) => {
+        onSuccessRef.current(token);
+      },
+      "error-callback": () => {
+        onErrorRef.current?.();
+        // Auto-reset on error so the form isn't permanently blocked
+        if (widgetIdRef.current) {
+          try { window.turnstile.reset(widgetIdRef.current); } catch (_) {}
         }
-      }, 100);
-      return () => clearInterval(checkInterval);
-    }
-
-    const script = document.createElement("script");
-    script.id = "turnstile-script";
-    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => setScriptReady(true);
-    document.head.appendChild(script);
+      },
+      "expired-callback": () => {
+        onExpiredRef.current?.();
+        // Re-run challenge silently when the token expires
+        if (widgetIdRef.current) {
+          try { window.turnstile.reset(widgetIdRef.current); } catch (_) {}
+        }
+      },
+    });
   }, [siteKey]);
 
-  // Render and execute invisible widget when script is ready
+  // Load the Turnstile script once, using the onload callback pattern
+  // which is the most reliable way to know when window.turnstile is ready.
+  // Key points:
+  //   - Use ?render=explicit so Turnstile doesn't auto-scan the DOM
+  //   - Use ?onload=onTurnstileLoad to get a reliable ready callback
+  //   - Do NOT add async or defer when using the onload param approach
   useEffect(() => {
-    if (!scriptReady || !window.turnstile || !containerRef.current) return;
+    if (!siteKey) return;
 
-    const renderAndExecute = () => {
-      if (widgetIdRef.current) {
-        try {
-          window.turnstile.remove(widgetIdRef.current);
-        } catch (e) {}
-      }
+    // Already loaded
+    if (window.turnstile) {
+      renderWidget();
+      return;
+    }
 
-      // Render invisible widget
-      widgetIdRef.current = window.turnstile.render(containerRef.current, {
-        sitekey: siteKey,
-        callback: (token: string) => {
-          onSuccess(token);
-        },
-        "error-callback": () => {
-          onError?.();
-        },
-        "expired-callback": () => {
-          onExpired?.();
-          // Re‑execute when expired
-          if (widgetIdRef.current) {
-            window.turnstile.reset(widgetIdRef.current);
-            window.turnstile.execute(widgetIdRef.current);
-          }
-        },
-        // Invisible mode settings
-        execution: "execute",
-        appearance: "interaction-only",
-        theme: "light",
-      });
+    // Script already injected but not yet ready — attach our callback
+    if (document.getElementById("turnstile-script")) {
+      window.onTurnstileLoad = renderWidget;
+      return;
+    }
 
-      // Execute the challenge automatically
-      if (widgetIdRef.current) {
-        window.turnstile.execute(widgetIdRef.current);
-      }
+    // Set the global callback that the script will call on load
+    window.onTurnstileLoad = renderWidget;
+
+    const script = document.createElement("script");
+    script.id    = "turnstile-script";
+    // ?render=explicit prevents auto-scan; ?onload= fires our callback when ready
+    script.src   = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad";
+    // Do NOT add async/defer when using ?onload — the callback timing depends
+    // on the script finishing naturally
+    document.head.appendChild(script);
+
+    return () => {
+      // Don't remove the script on unmount — other widgets may reuse it
     };
+  }, [siteKey, renderWidget]);
 
-    renderAndExecute();
+  // Re-render when the parent bumps `reset` (e.g. after a failed submission)
+  useEffect(() => {
+    if (reset === undefined || reset === 0) return;
+    if (window.turnstile) renderWidget();
+  }, [reset, renderWidget]);
 
-    // Cleanup on unmount or reset
+  // Cleanup widget on component unmount
+  useEffect(() => {
     return () => {
       if (widgetIdRef.current && window.turnstile) {
-        try {
-          window.turnstile.remove(widgetIdRef.current);
-        } catch (e) {}
+        try { window.turnstile.remove(widgetIdRef.current); } catch (_) {}
+        widgetIdRef.current = null;
       }
     };
-  }, [scriptReady, siteKey, reset, onSuccess, onError, onExpired]);
+  }, []);
 
   if (!siteKey) {
-    return <div className="text-destructive text-sm">Missing Turnstile site key</div>;
+    return (
+      <div className="text-destructive text-sm">
+        Missing Turnstile site key (VITE_TURNSTILE_SITE_KEY)
+      </div>
+    );
   }
 
-  // Invisible widget – no visible container
-  return <div ref={containerRef} style={{ display: "none" }} />;
+  // The container must exist in the DOM for Turnstile to mount into.
+  // Using visibility:hidden + zero dimensions keeps it out of the layout
+  // while remaining accessible to Turnstile's DOM queries.
+  // Do NOT use display:none — Turnstile cannot render into a hidden element.
+  return (
+    <div
+      ref={containerRef}
+      style={{ visibility: "hidden", width: 0, height: 0, overflow: "hidden" }}
+      aria-hidden="true"
+    />
+  );
 }
