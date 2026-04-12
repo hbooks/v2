@@ -14,6 +14,7 @@ import {
   LogOut,
   ShoppingBagIcon,
 } from "lucide-react";
+import { Navigate } from "react-router-dom";
 
 // ---------- Types ----------
 type Product = {
@@ -148,6 +149,7 @@ export default function AdminPage() {
     setIsAdminLoggedIn(false);
     setLoginEmail("");
     setLoginPassword("");
+    Navigate('/'); // Redirect to homepage after logout
     toast.info("Logged out of admin panel");
   };
 
