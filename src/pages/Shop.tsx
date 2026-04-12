@@ -208,7 +208,7 @@ export default function ShopPage() {
               className="mt-4 max-w-xl text-lg text-muted-foreground leading-relaxed"
               style={{ animation: "fadeSlideUp 0.7s 0.2s ease forwards", opacity: 0 }}
             >
-              Premium digital books and exclusive behind-the-scenes content from H.P. —
+              Premium digital books and exclusive behind-the-scenes content from Hooman Publishers. —
               stories that stay with you long after the last page.
             </p>
 
