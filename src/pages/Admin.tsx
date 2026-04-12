@@ -14,7 +14,7 @@ import {
   LogOut,
   ShoppingBagIcon,
 } from "lucide-react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 
 // ---------- Types ----------
 type Product = {
@@ -76,6 +76,7 @@ async function uploadImages(files: FileList, productName: string): Promise<strin
 // ---------- Main Admin Component ----------
 export default function AdminPage() {
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const navigate = useNavigate();
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -149,8 +150,8 @@ export default function AdminPage() {
     setIsAdminLoggedIn(false);
     setLoginEmail("");
     setLoginPassword("");
-    Navigate('/'); // Redirect to homepage after logout
     toast.info("Logged out of admin panel");
+    navigate('/'); // Redirect to homepage after logout
   };
 
 // Fetch all data (only after successful login)
