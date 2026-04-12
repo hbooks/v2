@@ -30,7 +30,7 @@ export default function GuestPopup() {
         <button onClick={dismiss} className="absolute right-4 top-4 text-muted-foreground hover:text-foreground">
           <X className="h-5 w-5" />
         </button>
-        <h2 className="mb-2 font-heading text-2xl font-bold text-foreground">Welcome to Hbooks</h2>
+        <h2 className="mb-2 font-heading text-2xl font-bold text-foreground">Welcome to Hbooks bookshop</h2>
         <p className="mb-6 text-sm text-muted-foreground">
           You are viewing the shop as a guest. Create an account for exclusive member benefits, or continue browsing.
         </p>

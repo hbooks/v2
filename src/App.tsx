@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { CartProvider } from "@/lib/cart-context";
+import { useAppVersion } from "@/hooks/useAppVersion";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 
@@ -38,6 +39,9 @@ function AppContent() {
   const location = useLocation();
   const isAdmin = location.pathname === "/scrd1478";
 
+  // Auto-reload when a new Cloudflare Pages deployment is detected
+  useAppVersion();
+
   // Show a full‑screen loader while auth is initializing
   if (loading) {
     return (
@@ -54,10 +58,11 @@ function AppContent() {
   if (isAdmin) {
     return <Admin />;
   }
-  // unverified page has no headers to prevent bypassing verification by navigating to other pages
-if (location.pathname === "/unverified-shop") {
-  return <UnverifiedShop />;
-}
+
+  // Unverified page has no headers to prevent bypassing verification
+  if (location.pathname === "/unverified-shop") {
+    return <UnverifiedShop />;
+  }
 
   // Normal layout for all other pages
   return (
