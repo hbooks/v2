@@ -2,299 +2,232 @@ import { useEffect, useState, useRef } from "react";
 import { CalendarDays } from "lucide-react";
 import { Link } from "react-router-dom";
 
-// Elegant dark library / reading atmosphere background
 const BACKGROUND_IMAGE =
   "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?q=80&w=2128&auto=format&fit=crop";
 
-const getInitialLaunchDate = () => {
-  const stored = localStorage.getItem("launch_date");
-  if (stored) return new Date(stored);
-  const date = new Date(2026, 4, 13, 0, 0, 0); // May 13, 2026
-  localStorage.setItem("launch_date", date.toISOString());
-  return date;
-};
+const LAUNCH_DATE = new Date(2026, 4, 13, 0, 0, 0); // May 13, 2026
 
-// ── Flip Card Unit ─────────────────────────────────────────────────────────
-// Renders a single time unit (days / hours / minutes / seconds) with a
-// realistic card-flip animation whenever the displayed number changes.
-function FlipUnit({
-  value,
-  label,
-}: {
-  value: number;
-  label: string;
-}) {
-  const [current, setCurrent]   = useState(value);
-  const [previous, setPrevious] = useState(value);
-  const [flipping, setFlipping] = useState(false);
-  const prevRef = useRef(value);
+function getTimeLeft(target: Date) {
+  const distance = target.getTime() - Date.now();
+  if (distance <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+  return {
+    days:    Math.floor(distance / 86400000),
+    hours:   Math.floor((distance % 86400000) / 3600000),
+    minutes: Math.floor((distance % 3600000) / 60000),
+    seconds: Math.floor((distance % 60000) / 1000),
+  };
+}
+
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+// ── Single flip card unit ──────────────────────────────────────────────────
+function FlipCard({ value, label }: { value: number; label: string }) {
+  const current  = pad(value);
+  const prevRef  = useRef(current);
+  const [prev, setPrev]       = useState(current);
+  const [animate, setAnimate] = useState(false);
 
   useEffect(() => {
-    if (value !== prevRef.current) {
-      setPrevious(prevRef.current);
-      setFlipping(true);
-      prevRef.current = value;
-
-      // After the flip animation completes, update current and reset
-      const t = setTimeout(() => {
-        setCurrent(value);
-        setFlipping(false);
-      }, 400); // must match CSS animation duration below
-      return () => clearTimeout(t);
+    if (current !== prevRef.current) {
+      setPrev(prevRef.current);
+      prevRef.current = current;
+      setAnimate(false);
+      // tiny delay so React re-mounts the animation
+      const raf = requestAnimationFrame(() => {
+        requestAnimationFrame(() => setAnimate(true));
+      });
+      return () => cancelAnimationFrame(raf);
     }
-  }, [value]);
-
-  const pad = (n: number) => String(n).padStart(2, "0");
+  }, [current]);
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      {/* Card */}
-      <div className="relative" style={{ width: 80, height: 96 }}>
-        <style>{`
-          @keyframes flipTop {
-            0%   { transform: rotateX(0deg); }
-            100% { transform: rotateX(-90deg); }
-          }
-          @keyframes flipBottom {
-            0%   { transform: rotateX(90deg); }
-            100% { transform: rotateX(0deg); }
-          }
-          .flip-top {
-            animation: flipTop 0.2s ease-in forwards;
-          }
-          .flip-bottom {
-            animation: flipBottom 0.2s 0.2s ease-out forwards;
-          }
-        `}</style>
+    <>
+      <style>{`
+        @keyframes foldTop {
+          from { transform: rotateX(0deg);   }
+          to   { transform: rotateX(-90deg); }
+        }
+        @keyframes revealBottom {
+          from { transform: rotateX(90deg); }
+          to   { transform: rotateX(0deg);  }
+        }
+        .fold-top    { animation: foldTop     0.25s linear   forwards; }
+        .reveal-bot  { animation: revealBottom 0.25s 0.25s linear forwards; }
+      `}</style>
 
-        {/* Static top half — shows current value top */}
-        <div
-          className="absolute left-0 right-0 top-0 overflow-hidden rounded-t-lg"
-          style={{
-            height: "50%",
-            background: "rgba(15,15,15,0.92)",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+        {/* card */}
+        <div style={{ position: "relative", width: 90, height: 110, perspective: 600 }}>
+
+          {/* ── static back (new value, always visible) ── */}
+          {/* top half of new */}
+          <div style={{
+            position: "absolute", top: 0, left: 0, right: 0, height: "50%",
+            background: "#1a1a1a",
+            borderRadius: "8px 8px 0 0",
+            overflow: "hidden",
+            display: "flex", alignItems: "flex-end", justifyContent: "center",
+            borderBottom: "1px solid #000",
             zIndex: 1,
-          }}
-        >
-          <div
-            className="flex items-end justify-center"
-            style={{
-              height: "200%",
-              fontSize: 52,
-              fontWeight: 700,
-              color: "hsl(var(--primary))",
-              lineHeight: 1,
-              paddingBottom: 4,
-              fontVariantNumeric: "tabular-nums",
-              fontFamily: "var(--font-heading, serif)",
-            }}
-          >
-            {pad(current)}
+          }}>
+            <span style={{ fontSize: 56, fontWeight: 800, color: "#f59e0b", lineHeight: 1, paddingBottom: 4, fontVariantNumeric: "tabular-nums" }}>
+              {current}
+            </span>
           </div>
-        </div>
-
-        {/* Static bottom half — shows current value bottom */}
-        <div
-          className="absolute bottom-0 left-0 right-0 overflow-hidden rounded-b-lg"
-          style={{
-            height: "50%",
-            background: "rgba(22,22,22,0.92)",
-            borderTop: "1px solid rgba(0,0,0,0.4)",
+          {/* bottom half of new */}
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0, height: "50%",
+            background: "#141414",
+            borderRadius: "0 0 8px 8px",
+            overflow: "hidden",
+            display: "flex", alignItems: "flex-start", justifyContent: "center",
+            borderTop: "1px solid #000",
             zIndex: 1,
-          }}
-        >
-          <div
-            className="flex items-start justify-center"
-            style={{
-              marginTop: "-50%",
-              height: "200%",
-              fontSize: 52,
-              fontWeight: 700,
-              color: "hsl(var(--primary))",
-              lineHeight: 1,
-              paddingTop: 4,
-              fontVariantNumeric: "tabular-nums",
-              fontFamily: "var(--font-heading, serif)",
-            }}
-          >
-            {pad(current)}
+          }}>
+            <span style={{ fontSize: 56, fontWeight: 800, color: "#f59e0b", lineHeight: 1, marginTop: -56, paddingTop: 4, fontVariantNumeric: "tabular-nums" }}>
+              {current}
+            </span>
           </div>
-        </div>
 
-        {/* Flipping top — old value flips away */}
-        {flipping && (
-          <div
-            className="flip-top absolute left-0 right-0 top-0 overflow-hidden rounded-t-lg"
-            style={{
-              height: "50%",
-              background: "rgba(15,15,15,0.95)",
-              borderBottom: "1px solid rgba(255,255,255,0.06)",
+          {/* ── animated flap: top half showing OLD value folds away ── */}
+          {animate && (
+            <div className="fold-top" style={{
+              position: "absolute", top: 0, left: 0, right: 0, height: "50%",
+              background: "#1a1a1a",
+              borderRadius: "8px 8px 0 0",
+              overflow: "hidden",
+              display: "flex", alignItems: "flex-end", justifyContent: "center",
+              borderBottom: "1px solid #000",
               transformOrigin: "bottom center",
-              zIndex: 3,
-            }}
-          >
-            <div
-              className="flex items-end justify-center"
-              style={{
-                height: "200%",
-                fontSize: 52,
-                fontWeight: 700,
-                color: "hsl(var(--primary))",
-                lineHeight: 1,
-                paddingBottom: 4,
-                fontVariantNumeric: "tabular-nums",
-                fontFamily: "var(--font-heading, serif)",
-              }}
-            >
-              {pad(previous)}
+              zIndex: 4,
+              backfaceVisibility: "hidden",
+            }}>
+              <span style={{ fontSize: 56, fontWeight: 800, color: "#f59e0b", lineHeight: 1, paddingBottom: 4, fontVariantNumeric: "tabular-nums" }}>
+                {prev}
+              </span>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Flipping bottom — new value flips in */}
-        {flipping && (
-          <div
-            className="flip-bottom absolute bottom-0 left-0 right-0 overflow-hidden rounded-b-lg"
-            style={{
-              height: "50%",
-              background: "rgba(22,22,22,0.95)",
-              borderTop: "1px solid rgba(0,0,0,0.4)",
+          {/* ── animated flap: bottom half showing NEW value flips in ── */}
+          {animate && (
+            <div className="reveal-bot" style={{
+              position: "absolute", bottom: 0, left: 0, right: 0, height: "50%",
+              background: "#141414",
+              borderRadius: "0 0 8px 8px",
+              overflow: "hidden",
+              display: "flex", alignItems: "flex-start", justifyContent: "center",
+              borderTop: "1px solid #000",
               transformOrigin: "top center",
-              zIndex: 3,
-            }}
-          >
-            <div
-              className="flex items-start justify-center"
-              style={{
-                marginTop: "-50%",
-                height: "200%",
-                fontSize: 52,
-                fontWeight: 700,
-                color: "hsl(var(--primary))",
-                lineHeight: 1,
-                paddingTop: 4,
-                fontVariantNumeric: "tabular-nums",
-                fontFamily: "var(--font-heading, serif)",
-              }}
-            >
-              {pad(value)}
+              zIndex: 4,
+              backfaceVisibility: "hidden",
+            }}>
+              <span style={{ fontSize: 56, fontWeight: 800, color: "#f59e0b", lineHeight: 1, marginTop: -56, paddingTop: 4, fontVariantNumeric: "tabular-nums" }}>
+                {current}
+              </span>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Center divider line — the "spine" of the flip */}
-        <div
-          className="pointer-events-none absolute left-0 right-0"
-          style={{
-            top: "50%",
-            height: 2,
-            background: "rgba(0,0,0,0.7)",
-            zIndex: 4,
-            transform: "translateY(-50%)",
-          }}
-        />
+          {/* spine */}
+          <div style={{
+            position: "absolute", top: "50%", left: 0, right: 0,
+            height: 2, background: "#000",
+            transform: "translateY(-50%)", zIndex: 5,
+            pointerEvents: "none",
+          }} />
+        </div>
+
+        {/* label */}
+        <span style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: "0.2em",
+          textTransform: "uppercase", color: "rgba(255,255,255,0.5)",
+        }}>
+          {label}
+        </span>
       </div>
-
-      {/* Label */}
-      <span
-        className="text-xs font-semibold uppercase tracking-widest"
-        style={{ color: "rgba(200,200,200,0.7)", letterSpacing: "0.18em" }}
-      >
-        {label}
-      </span>
-    </div>
+    </>
   );
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────
 export default function ComingSoon() {
-  const [timeLeft, setTimeLeft] = useState({
-    days: 0,
-    hours: 0,
-    minutes: 0,
-    seconds: 0,
-  });
-  const [launchDate] = useState(getInitialLaunchDate);
+  const [timeLeft, setTimeLeft] = useState(() => getTimeLeft(LAUNCH_DATE));
 
   useEffect(() => {
-    const tick = () => {
-      const now      = new Date().getTime();
-      const distance = launchDate.getTime() - now;
-
-      if (distance < 0) {
-        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
-        return;
-      }
-
-      setTimeLeft({
-        days:    Math.floor(distance / (1000 * 60 * 60 * 24)),
-        hours:   Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
-        minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
-        seconds: Math.floor((distance % (1000 * 60)) / 1000),
-      });
-    };
-
-    tick();
-    const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, [launchDate]);
+    const id = setInterval(() => setTimeLeft(getTimeLeft(LAUNCH_DATE)), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
-    <div
-      className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-cover bg-center px-4 text-center"
-      style={{
-        backgroundImage: `linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.72)), url(${BACKGROUND_IMAGE})`,
-      }}
-    >
-      {/* Extra depth vignette */}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.55) 100%)",
-        }}
-      />
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      textAlign: "center",
+      padding: "0 16px",
+      backgroundImage: `linear-gradient(rgba(0,0,0,0.6), rgba(0,0,0,0.75)), url(${BACKGROUND_IMAGE})`,
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      {/* vignette */}
+      <div style={{
+        position: "absolute", inset: 0, pointerEvents: "none",
+        background: "radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,0.5) 100%)",
+      }} />
 
-      <div className="relative z-10 max-w-3xl animate-fade-in">
+      <div style={{ position: "relative", zIndex: 10, maxWidth: 640 }}>
 
-        {/* Brand */}
-        <h1 className="font-heading text-5xl font-bold tracking-tight text-white drop-shadow-lg md:text-7xl">
+        {/* brand */}
+        <h1 style={{ fontSize: "clamp(48px, 8vw, 80px)", fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-1px" }}>
           Hbooks
         </h1>
-        <div className="mx-auto mt-3 h-0.5 w-24 rounded-full bg-primary/80" />
+        <div style={{ width: 60, height: 3, background: "#f59e0b", borderRadius: 2, margin: "10px auto 0" }} />
 
-        {/* Headline */}
-        <p className="mt-8 text-xl text-gray-200 md:text-2xl">
+        {/* headline */}
+        <p style={{ marginTop: 32, fontSize: "clamp(16px, 2.5vw, 22px)", color: "#e5e7eb", lineHeight: 1.5 }}>
           Something extraordinary is on the horizon.
         </p>
-        <p className="mt-2 text-base text-gray-400">
-          We're crafting a brand new membership experience for book lovers.
+        <p style={{ marginTop: 8, fontSize: 15, color: "#9ca3af" }}>
+          A brand-new membership experience for book lovers — coming soon.
         </p>
 
-        {/* Flip countdown */}
-        <div className="mt-14 flex flex-wrap items-end justify-center gap-3 sm:gap-6">
-          <FlipUnit value={timeLeft.days}    label="Days"    />
-          <span className="mb-10 text-3xl font-light text-white/30 select-none">:</span>
-          <FlipUnit value={timeLeft.hours}   label="Hours"   />
-          <span className="mb-10 text-3xl font-light text-white/30 select-none">:</span>
-          <FlipUnit value={timeLeft.minutes} label="Minutes" />
-          <span className="mb-10 text-3xl font-light text-white/30 select-none">:</span>
-          <FlipUnit value={timeLeft.seconds} label="Seconds" />
+        {/* flip countdown */}
+        <div style={{
+          marginTop: 56,
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          gap: "8px 4px",
+        }}>
+          <FlipCard value={timeLeft.days}    label="Days"    />
+          <span style={{ fontSize: 48, fontWeight: 200, color: "rgba(255,255,255,0.2)", lineHeight: 1, alignSelf: "flex-start", marginTop: 20, padding: "0 2px" }}>:</span>
+          <FlipCard value={timeLeft.hours}   label="Hours"   />
+          <span style={{ fontSize: 48, fontWeight: 200, color: "rgba(255,255,255,0.2)", lineHeight: 1, alignSelf: "flex-start", marginTop: 20, padding: "0 2px" }}>:</span>
+          <FlipCard value={timeLeft.minutes} label="Minutes" />
+          <span style={{ fontSize: 48, fontWeight: 200, color: "rgba(255,255,255,0.2)", lineHeight: 1, alignSelf: "flex-start", marginTop: 20, padding: "0 2px" }}>:</span>
+          <FlipCard value={timeLeft.seconds} label="Seconds" />
         </div>
 
-        {/* Launch date label */}
-        <p className="mt-8 text-sm text-gray-500 tracking-wide">
+        {/* launch label */}
+        <p style={{ marginTop: 28, fontSize: 13, color: "#6b7280", letterSpacing: "0.1em" }}>
           Launching · May 13, 2026
         </p>
 
-        {/* Back link */}
-        <div className="mt-12">
+        {/* back link */}
+        <div style={{ marginTop: 48 }}>
           <Link
             to="/"
-            className="inline-flex items-center gap-2 text-gray-400 transition-colors hover:text-white"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "#9ca3af", textDecoration: "none", fontSize: 14, transition: "color 0.2s" }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#fff")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#9ca3af")}
           >
-            <CalendarDays className="h-4 w-4" />
+            <CalendarDays style={{ width: 16, height: 16 }} />
             Return to current shop
           </Link>
         </div>
