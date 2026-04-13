@@ -11,7 +11,7 @@ const getInitialLaunchDate = () => {
   const stored = localStorage.getItem("launch_date");
   if (stored) return new Date(stored);
   // Set your own date here: year, month (0‑based), day, hour, minute, second
-  const date = new Date(2026, 5, 13, 0, 0, 0); // May 13, 2026
+  const date = new Date(2026, 4, 13, 0, 0, 0); // May 13, 2026
   localStorage.setItem("launch_date", date.toISOString());
   return date;
 };
